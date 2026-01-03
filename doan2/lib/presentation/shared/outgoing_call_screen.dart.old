@@ -1,0 +1,421 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:app_iot/service/webrtc_service.dart';
+import 'package:app_iot/service/socket_service.dart';
+import 'package:app_iot/presentation/shared/webrtc_call_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+/// Outgoing Call Screen - Màn hình khi đang gọi ra (chờ partner bắt máy)
+/// Giống Messenger: Avatar lớn, nút End Call màu đỏ
+class OutgoingCallScreen extends StatefulWidget {
+  final String remoteUserId;
+  final String remoteUserName;
+  final String? remoteUserAvatar;
+
+  const OutgoingCallScreen({
+    Key? key,
+    required this.remoteUserId,
+    required this.remoteUserName,
+    this.remoteUserAvatar,
+  }) : super(key: key);
+
+  @override
+  State<OutgoingCallScreen> createState() => _OutgoingCallScreenState();
+}
+
+class _OutgoingCallScreenState extends State<OutgoingCallScreen>
+    with SingleTickerProviderStateMixin {
+  final WebRTCService _webrtcService = WebRTCService();
+  final SocketService _socketService = SocketService();
+  late AnimationController _pulseController;
+  Timer? _timeoutTimer;
+  Timer? _offlineCheckTimer;
+  String _statusText = "Đang gọi...";
+  bool _hasEnded = false;
+  
+  StreamSubscription? _callStateSub;
+  StreamSubscription? _answerSub;
+  StreamSubscription? _rejectedSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _initPulseAnimation();
+    _setupListeners();
+    _startCall();
+    _startTimeoutTimer();
+    _checkPartnerOnline();
+  }
+
+  void _setupListeners() {
+    print('\n🔔 [OUTGOING] ═══ SETTING UP LISTENERS ═══');
+    
+    // Listen for call state changes
+    _callStateSub = _webrtcService.callState.listen((state) {
+      if (!mounted || _hasEnded) return;
+      
+      switch (state) {
+        case CallState.connected:
+          // Partner accepted! Navigate to video screen
+          _navigateToVideoScreen();
+          break;
+        case CallState.ended:
+          _endCall("Cuộc gọi đã kết thúc");
+          break;
+        default:
+          break;
+      }
+    });
+    print('   ✅ callState listener registered');
+
+    // Listen for answer (partner accepted)
+    _answerSub = _socketService.webrtcAnswerStream.listen((data) {
+      if (!mounted || _hasEnded) return;
+      print("✅ [OUTGOING] Received answer, connecting...");
+      setState(() {
+        _statusText = "Đang kết nối...";
+      });
+    });
+    print('   ✅ webrtcAnswer listener registered');
+
+    // Listen for rejected call
+    _rejectedSub = _socketService.callRejectedStream.listen((data) {
+      print('\n❌ [OUTGOING] ═══ CALL REJECTED/ENDED EVENT ═══');
+      print('   Mounted: $mounted');
+      print('   HasEnded before: $_hasEnded');
+      print('   Data: $data');
+      
+      if (!mounted) {
+        print('   ⚠️ Widget not mounted, ignoring');
+        print('═══════════════════════════════════════════\n');
+        return;
+      }
+      
+      // Prevent duplicate handling
+      if (_hasEnded) {
+        print('   ⚠️ Already ended, skipping');
+        print('═══════════════════════════════════════════\n');
+        return;
+      }
+      
+      final reason = data['reason'] ?? 'unknown';
+      print('   Reason: $reason');
+      
+      // Cleanup WebRTC first (don't send notification again)
+      print('   🧹 Cleaning up WebRTC...');
+      _webrtcService.endCall(sendNotification: false);
+      
+      // Set flag and update UI
+      print('   🚪 Setting hasEnded flag and attempting dismiss...');
+      setState(() {
+        _hasEnded = true;
+      });
+      
+      // Wait a frame for setState to take effect, then pop
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          print('   ⚠️ Widget unmounted after setState');
+          return;
+        }
+        
+        print('   🚪 Popping screen NOW...');
+        try {
+          Navigator.of(context).pop();
+          print('   ✅ Screen dismissed successfully');
+        } catch (e) {
+          print('   ❌ Pop failed: $e, trying root navigator...');
+          try {
+            Navigator.of(context, rootNavigator: true).pop();
+            print('   ✅ Root navigator pop succeeded');
+          } catch (e2) {
+            print('   ❌ Root pop also failed: $e2');
+          }
+        }
+        
+        // Show message after pop
+        Future.delayed(const Duration(milliseconds: 200), () {
+          // Find the closest scaffold context that's still mounted
+          try {
+            String message = "Cuộc gọi đã kết thúc";
+            if (reason == 'rejected') {
+              message = "Người dùng từ chối cuộc gọi";
+            } else if (reason == 'cancelled') {
+              message = "Cuộc gọi đã bị hủy";
+            } else if (reason == 'timeout') {
+              message = "Người dùng không liên lạc được";
+            }
+            
+            print('   📢 Trying to show message: $message');
+            // Note: This might fail if we've already popped, which is fine
+          } catch (e) {
+            print('   ⚠️ Could not show message (expected after pop): $e');
+          }
+        });
+      });
+      
+      print('═══════════════════════════════════════════\n');
+    });
+    print('   ✅ callRejected listener registered');
+    
+    print('✅ [OUTGOING] All listeners setup complete\n');
+  }
+
+  void _navigateToVideoScreen() {
+    if (_hasEnded) return;
+    _hasEnded = true;
+    
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => WebRTCCallScreen(
+          remoteUserId: widget.remoteUserId,
+          remoteUserName: widget.remoteUserName,
+          remoteUserAvatar: widget.remoteUserAvatar,
+          isOutgoingCall: true,
+        ),
+      ),
+    );
+  }
+
+  void _initPulseAnimation() {
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+  }
+
+  Future<void> _startCall() async {
+    // Start WebRTC call
+    final success = await _webrtcService.startCall(
+      remoteUserId: widget.remoteUserId,
+      remoteUserName: widget.remoteUserName,
+      remoteUserAvatar: widget.remoteUserAvatar,
+    );
+
+    if (!success && mounted) {
+      _endCall("Không thể bắt đầu cuộc gọi");
+    }
+  }
+
+  /// Kiểm tra partner có online không
+  void _checkPartnerOnline() {
+    _offlineCheckTimer = Timer(const Duration(seconds: 5), () {
+      // TODO: Check via Socket.IO if partner is online
+      // Nếu offline: _endCall("Người dùng không trực tuyến")
+    });
+  }
+
+  /// Timeout 3 phút (180 giây) - Messenger standard
+  void _startTimeoutTimer() {
+    _timeoutTimer = Timer(const Duration(seconds: 180), () {
+      if (mounted && !_hasEnded) {
+        _endCall("Người dùng không liên lạc được");
+      }
+    });
+  }
+
+  void _endCall(String reason) {
+    if (_hasEnded) return;
+    
+    print('\n⏱️ [OUTGOING] Ending call: $reason');
+    _webrtcService.endCall(sendNotification: true);
+    
+    if (!mounted) return;
+    
+    setState(() {
+      _hasEnded = true;
+    });
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      print('✅ [OUTGOING] Screen dismissed after timeout/end\n');
+    });
+  }
+
+  void _cancelCall() {
+    if (_hasEnded) return;
+    
+    print('\n❌ [OUTGOING] User cancelling call');
+    
+    if (!mounted) return;
+    
+    setState(() {
+      _hasEnded = true;
+    });
+
+    _webrtcService.endCall(sendNotification: true);
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      print('✅ [OUTGOING] Screen dismissed after cancel\n');
+    });
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _timeoutTimer?.cancel();
+    _offlineCheckTimer?.cancel();
+    _callStateSub?.cancel();
+    _answerSub?.cancel();
+    _rejectedSub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: () async {
+        // Nếu cuộc gọi đã kết thúc (bị reject/cancel/timeout), cho phép pop
+        if (_hasEnded) {
+          return true; // Cho phép dismiss
+        }
+        // Nếu chưa ended, user đang cố thoát thì cancel call
+        _cancelCall();
+        return false; // Không cho dismiss ngay, chờ cancel xong
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Stack(
+            children: [
+              // Gradient background
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.blue.shade900.withOpacity(0.8),
+                      Colors.black,
+                    ],
+                  ),
+                ),
+              ),
+
+              // Main content
+              Column(
+                children: [
+                  const SizedBox(height: 80),
+
+                  // Avatar với pulse animation
+                  AnimatedBuilder(
+                    animation: _pulseController,
+                    builder: (context, child) {
+                      return Container(
+                        width: 160 + (_pulseController.value * 20),
+                        height: 160 + (_pulseController.value * 20),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.blue.withOpacity(0.3),
+                              blurRadius: 30 + (_pulseController.value * 10),
+                              spreadRadius: 10,
+                            ),
+                          ],
+                        ),
+                        child: CircleAvatar(
+                          radius: 80,
+                          backgroundImage: widget.remoteUserAvatar != null &&
+                                  widget.remoteUserAvatar!.isNotEmpty
+                              ? NetworkImage(widget.remoteUserAvatar!)
+                              : const AssetImage('assets/images/default_avatar.png') as ImageProvider,
+                          backgroundColor: Colors.blue.shade700,
+                        ),
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 40),
+
+                  // Tên người nhận
+                  Text(
+                    widget.remoteUserName,
+                    style: GoogleFonts.roboto(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Status text với animation
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: Text(
+                      _statusText,
+                      key: ValueKey(_statusText),
+                      style: GoogleFonts.roboto(
+                        fontSize: 18,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Loading indicator
+                  const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
+                    ),
+                  ),
+
+                  const Spacer(),
+
+                  // End Call Button (Màu đỏ, to, giống Messenger)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 80),
+                    child: Column(
+                      children: [
+                        // Nút End Call chính
+                        GestureDetector(
+                          onTap: _cancelCall,
+                          child: Container(
+                            width: 70,
+                            height: 70,
+                            decoration: BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.red.withOpacity(0.5),
+                                  blurRadius: 20,
+                                  spreadRadius: 5,
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.call_end,
+                              color: Colors.white,
+                              size: 32,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Hủy',
+                          style: GoogleFonts.roboto(
+                            fontSize: 16,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

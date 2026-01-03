@@ -1,0 +1,132 @@
+# ============================================
+# GITIGNORE FOR HEALTH IOT PROJECT
+# ============================================
+# This file excludes unnecessary files from version control
+# to keep the repository clean and optimized
+
+# ============================================
+# FLUTTER SDK - NEVER COMMIT THIS!
+# ============================================
+# The entire Flutter SDK should NOT be in your project
+/flutter/
+
+# ============================================
+# FLUTTER PROJECT (doan2/)
+# ============================================
+# Dart/Flutter build artifacts
+doan2/.dart_tool/
+doan2/.flutter-plugins
+doan2/.flutter-plugins-dependencies
+doan2/.packages
+doan2/build/
+doan2/coverage/
+doan2/exportToHTML/
+
+# Flutter version and packages
+doan2/.pub-cache/
+doan2/.pub/
+doan2/pubspec.lock
+
+# iOS specific
+doan2/ios/Flutter/.last_build_id
+doan2/ios/Flutter/Flutter.framework
+doan2/ios/Flutter/Flutter.podspec
+doan2/ios/Pods/
+doan2/ios/.symlinks/
+doan2/ios/DerivedData/
+doan2/ios/*.ipa
+
+# Android specific
+doan2/android/.gradle/
+doan2/android/.idea/
+doan2/android/captures/
+doan2/android/local.properties
+doan2/android/gradle/
+doan2/android/gradlew
+doan2/android/gradlew.bat
+doan2/android/*.iml
+doan2/android/app/debug/
+doan2/android/app/profile/
+doan2/android/app/release/
+doan2/android/build/
+doan2/android/app/build/
+doan2/android/.cxx/
+
+# Windows specific
+doan2/windows/flutter/
+doan2/windows/build/
+
+# Web specific
+doan2/web/favicon.png
+
+# ============================================
+# NODE.JS PROJECT (HealthAI_Server/)
+# ============================================
+HealthAI_Server/node_modules/
+HealthAI_Server/package-lock.json
+HealthAI_Server/yarn.lock
+HealthAI_Server/pnpm-lock.yaml
+HealthAI_Server/dist/
+HealthAI_Server/build/
+HealthAI_Server/coverage/
+HealthAI_Server/.env
+HealthAI_Server/.env.local
+HealthAI_Server/.env.*.local
+HealthAI_Server/logs/
+HealthAI_Server/*.log
+HealthAI_Server/npm-debug.log*
+HealthAI_Server/yarn-debug.log*
+HealthAI_Server/yarn-error.log*
+HealthAI_Server/.nyc_output/
+
+# ============================================
+# NEXT.JS PROJECT (admin-portal/)
+# ============================================
+admin-portal/node_modules/
+admin-portal/.next/
+admin-portal/out/
+admin-portal/dist/
+admin-portal/build/
+admin-portal/.env*.local
+admin-portal/.vercel
+admin-portal/*.tsbuildinfo
+admin-portal/next-env.d.ts
+
+# ============================================
+# GENERAL
+# ============================================
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.log
+
+# IDE specific
+.vscode/settings.json
+.vscode/*.code-snippets
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+.sublime-workspace
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.cache
+
+# Documentation build artifacts
+*.md~
+
+# Images and media that are too large (optional - uncomment if needed)
+# image/SUMMARY/

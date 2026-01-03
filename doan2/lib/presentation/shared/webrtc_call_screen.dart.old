@@ -1,0 +1,883 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:app_iot/service/webrtc_service.dart';
+import 'package:app_iot/service/socket_service.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+/// Video Call Screen - UI giống Messenger
+/// Fullscreen, video remote ở background, local video ở góc
+class WebRTCCallScreen extends StatefulWidget {
+  final String remoteUserId;
+  final String remoteUserName;
+  final String? remoteUserAvatar;
+  final bool isOutgoingCall; // true = gọi ra, false = nhận cuộc gọi
+
+  const WebRTCCallScreen({
+    Key? key,
+    required this.remoteUserId,
+    required this.remoteUserName,
+    this.remoteUserAvatar,
+    required this.isOutgoingCall,
+  }) : super(key: key);
+
+  @override
+  State<WebRTCCallScreen> createState() => _WebRTCCallScreenState();
+}
+
+class _WebRTCCallScreenState extends State<WebRTCCallScreen> with TickerProviderStateMixin {
+  final WebRTCService _webrtcService = WebRTCService();
+  final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
+  final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
+
+  StreamSubscription? _localStreamSub;
+  StreamSubscription? _remoteStreamSub;
+  StreamSubscription? _callStateSub;
+  StreamSubscription? _rejectedSub;
+
+  bool _isConnected = false;
+  bool _isMicOn = true;
+  bool _isCameraOn = true;
+  bool _isSpeakerOn = true;
+  String _callStatus = "Đang kết nối...";
+  Duration _callDuration = Duration.zero;
+  Timer? _durationTimer;
+  Timer? _timeoutTimer; // Timeout 3 phút cho outgoing call
+  bool _hasEnded = false;
+
+  // Messenger-style UI controls
+  bool _showControls = true;
+  Timer? _hideControlsTimer;
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
+  
+  // Connection quality
+  String _connectionQuality = "good"; // good, moderate, poor
+
+  @override
+  void initState() {
+    super.initState();
+    _initAnimations();
+    _initRenderers();
+    _setupListeners();
+    _updateCallStatus();
+    _startAutoHideControlsTimer();
+    
+    // Nếu là outgoing call, chỉ start timeout (call đã được start từ chat screen)
+    if (widget.isOutgoingCall) {
+      _startTimeoutTimer();
+    }
+  }
+
+  void _initAnimations() {
+    // Pulse animation cho avatar khi đang kết nối
+    _pulseController = AnimationController(
+      duration: const Duration(milliseconds: 1500),
+      vsync: this,
+    )..repeat(reverse: true);
+    
+    _pulseAnimation = Tween<double>(begin: 0.95, end: 1.05).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+  }
+
+  void _startAutoHideControlsTimer() {
+    _hideControlsTimer?.cancel();
+    _hideControlsTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _isConnected) {
+        setState(() {
+          _showControls = false;
+        });
+      }
+    });
+  }
+
+  void _toggleControls() {
+    setState(() {
+      _showControls = !_showControls;
+    });
+    if (_showControls) {
+      _startAutoHideControlsTimer();
+    }
+  }
+
+  Future<void> _initRenderers() async {
+    await _localRenderer.initialize();
+    await _remoteRenderer.initialize();
+  }
+
+  void _setupListeners() {
+    // Listen for local stream
+    _localStreamSub = _webrtcService.localStream.listen((stream) {
+      if (stream != null) {
+        setState(() {
+          _localRenderer.srcObject = stream;
+        });
+      }
+    });
+
+    // Listen for remote stream
+    _remoteStreamSub = _webrtcService.remoteStream.listen((stream) {
+      if (stream != null) {
+        setState(() {
+          _remoteRenderer.srcObject = stream;
+        });
+      }
+    });
+
+    // Listen for call state
+    _callStateSub = _webrtcService.callState.listen((state) {
+      if (state == CallState.connected) {
+        // Cancel timeout khi đã connected
+        _timeoutTimer?.cancel();
+        
+        setState(() {
+          _isConnected = true;
+          _callStatus = "Đang kết nối";
+        });
+        _startDurationTimer();
+        
+        // Simulate connection quality monitoring (in production, use real stats)
+        _startConnectionQualityMonitoring();
+      } else if (state == CallState.reconnecting) {
+        // Network hiccup - attempting to reconnect
+        setState(() {
+          _callStatus = "Đang kết nối lại...";
+          _connectionQuality = "poor";
+        });
+      } else if (state == CallState.timeout) {
+        // Call timeout - no answer
+        _endCallSafely("Không có phản hồi", sendNotification: false, reason: 'timeout');
+      } else if (state == CallState.busy) {
+        // Remote user is busy
+        _endCallSafely("Người dùng đang bận", sendNotification: false, reason: 'busy');
+      } else if (state == CallState.ended) {
+        _endCallSafely("Đã kết thúc", sendNotification: false, reason: 'ended');
+      }
+    });
+
+    // Listen for rejected call (chỉ với outgoing call)
+    if (widget.isOutgoingCall) {
+      final socketService = SocketService();
+      _rejectedSub = socketService.callRejectedStream.listen((data) {
+        if (!mounted || _hasEnded) return;
+        _endCallSafely("Người dùng từ chối cuộc gọi");
+      });
+    }
+  }
+
+  /// Start outgoing call (chỉ cho outgoing)
+  Future<void> _startOutgoingCall() async {
+    final success = await _webrtcService.startCall(
+      remoteUserId: widget.remoteUserId,
+      remoteUserName: widget.remoteUserName,
+      remoteUserAvatar: widget.remoteUserAvatar,
+    );
+
+    if (!success && mounted && !_hasEnded) {
+      _endCallSafely("Không thể bắt đầu cuộc gọi");
+    }
+  }
+
+  /// Timeout 3 phút (180 giây) - Messenger standard
+  void _startTimeoutTimer() {
+    _timeoutTimer = Timer(const Duration(seconds: 180), () {
+      if (mounted && !_hasEnded && !_isConnected) {
+        _endCallSafely("Người dùng không liên lạc được");
+      }
+    });
+  }
+
+  void _updateCallStatus() {
+    if (widget.isOutgoingCall) {
+      setState(() => _callStatus = "Đang gọi...");
+    } else {
+      setState(() => _callStatus = "Đang kết nối...");
+    }
+  }
+
+  void _startDurationTimer() {
+    _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _callDuration = Duration(seconds: _callDuration.inSeconds + 1);
+      });
+    });
+  }
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+    
+    if (hours > 0) {
+      return "${twoDigits(hours)}:${twoDigits(minutes)}:${twoDigits(seconds)}";
+    }
+    return "${twoDigits(minutes)}:${twoDigits(seconds)}";
+  }
+
+  Future<void> _endCall() async {
+    _endCallSafely("Kết thúc cuộc gọi", sendNotification: true, reason: 'ended');
+  }
+
+  Future<void> _endCallSafely(String message, {bool sendNotification = true, String reason = 'ended'}) async {
+    if (_hasEnded) return;
+    _hasEnded = true;
+
+    _durationTimer?.cancel();
+    _timeoutTimer?.cancel();
+    
+    await _webrtcService.endCall(sendNotification: sendNotification, reason: reason);
+    
+    if (mounted) {
+      Navigator.of(context).pop();
+      
+      // Show reason if not normal end
+      if (message != "Kết thúc cuộc gọi") {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _toggleMic() async {
+    await _webrtcService.toggleMic();
+    setState(() => _isMicOn = _webrtcService.isMicOn);
+  }
+
+  Future<void> _toggleCamera() async {
+    await _webrtcService.toggleCamera();
+    setState(() => _isCameraOn = _webrtcService.isCameraOn);
+  }
+
+  Future<void> _switchCamera() async {
+    await _webrtcService.switchCamera();
+  }
+
+  Future<void> _toggleSpeaker() async {
+    await _webrtcService.toggleSpeaker();
+    setState(() => _isSpeakerOn = _webrtcService.isSpeakerOn);
+  }
+
+  void _startConnectionQualityMonitoring() {
+    // Simulate connection quality monitoring
+    // In production, you would use RTCPeerConnection.getStats()
+    Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (!mounted || _hasEnded) {
+        timer.cancel();
+        return;
+      }
+      
+      // Simulate random quality for demo
+      // In real app: analyze RTCStats for packet loss, jitter, etc.
+      final random = DateTime.now().second % 3;
+      setState(() {
+        if (random == 0) {
+          _connectionQuality = "good";
+        } else if (random == 1) {
+          _connectionQuality = "moderate";
+        } else {
+          _connectionQuality = "poor";
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _durationTimer?.cancel();
+    _timeoutTimer?.cancel();
+    _hideControlsTimer?.cancel();
+    _pulseController.dispose();
+    _localStreamSub?.cancel();
+    _remoteStreamSub?.cancel();
+    _callStateSub?.cancel();
+    _rejectedSub?.cancel();
+    _localRenderer.dispose();
+    _remoteRenderer.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: () async {
+        // Prevent accidental back button press
+        // User must use end call button
+        return false;
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: GestureDetector(
+            onTap: _toggleControls,
+            behavior: HitTestBehavior.translucent,
+            child: Stack(
+              children: [
+                // Remote video (fullscreen background)
+                _buildRemoteVideo(),
+
+                // Animated overlays and controls
+                _buildTopBar(),
+                _buildLocalVideo(),
+                _buildBottomControls(),
+                _buildConnectionIndicator(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRemoteVideo() {
+    if (_remoteRenderer.srcObject != null) {
+      return Container(
+        color: Colors.black,
+        child: Center(
+          child: AspectRatio(
+            aspectRatio: 16 / 9, // Match video stream aspect ratio
+            child: RTCVideoView(
+              _remoteRenderer,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+              mirror: false,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Placeholder khi chưa có video
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Avatar với pulse animation
+            ScaleTransition(
+              scale: _pulseAnimation,
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF06B6D4).withOpacity(0.3),
+                      blurRadius: 30,
+                      spreadRadius: 10,
+                    ),
+                  ],
+                ),
+                child: CircleAvatar(
+                  radius: 60,
+                  backgroundColor: Colors.grey[800],
+                  backgroundImage: widget.remoteUserAvatar != null && widget.remoteUserAvatar!.isNotEmpty
+                      ? NetworkImage(widget.remoteUserAvatar!)
+                      : const AssetImage('assets/images/default_avatar.png') as ImageProvider,
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              widget.remoteUserName,
+              style: GoogleFonts.inter(
+                fontSize: 28,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: _isConnected ? Colors.green : Colors.orange,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _callStatus,
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return AnimatedOpacity(
+      opacity: _showControls ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 300),
+      child: SafeArea(
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withOpacity(0.7),
+                Colors.transparent,
+              ],
+            ),
+          ),
+          child: Row(
+            children: [
+              // User name
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.remoteUserName,
+                      style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withOpacity(0.5),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    if (_isConnected)
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.access_time,
+                            size: 14,
+                            color: Colors.white70,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _formatDuration(_callDuration),
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Text(
+                        _callStatus,
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: Colors.white70,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
+              // Switch camera button
+              _buildIconButton(
+                icon: Icons.flip_camera_ios,
+                onPressed: _switchCamera,
+                tooltip: 'Đổi camera',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocalVideo() {
+    if (_localRenderer.srcObject == null) {
+      return const SizedBox.shrink();
+    }
+
+    // Use 16:9 aspect ratio to match video stream (1280x720)
+    const double localVideoWidth = 120.0;
+    const double localVideoHeight = localVideoWidth * 9 / 16; // 16:9 aspect ratio
+
+    return Positioned(
+      top: 80, // Below top bar
+      right: 16,
+      child: GestureDetector(
+        onTap: () {
+          // Tap to bring back controls
+          if (!_showControls) {
+            _toggleControls();
+          }
+        },
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 300),
+          opacity: _showControls ? 1.0 : 0.0,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              width: localVideoWidth,
+              height: localVideoHeight,
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: const Color(0xFF06B6D4).withOpacity(0.5), 
+                  width: 2.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.6),
+                    blurRadius: 25,
+                    spreadRadius: 3,
+                    offset: const Offset(0, 4),
+                  ),
+                  BoxShadow(
+                    color: const Color(0xFF06B6D4).withOpacity(0.2),
+                    blurRadius: 15,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+              child: Stack(
+                children: [
+                  // Video stream
+                  if (_isCameraOn)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: RTCVideoView(
+                      _localRenderer,
+                      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                      mirror: true, // Mirror cho camera trước
+                    ),
+                  )
+                else
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.videocam_off,
+                            color: Colors.white54,
+                            size: 32,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Camera tắt',
+                            style: GoogleFonts.inter(
+                              fontSize: 10,
+                              color: Colors.white54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                
+                // "Bạn" label at bottom
+                Positioned(
+                  bottom: 4,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 6),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.7),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                    child: Text(
+                      'Bạn',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        fontSize: 10,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ));
+  }
+
+  Widget _buildBottomControls() {
+    return AnimatedPositioned(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+      left: 0,
+      right: 0,
+      bottom: _showControls ? 0 : -150,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 40, horizontal: 20),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [
+              Colors.black.withOpacity(0.8),
+              Colors.transparent,
+            ],
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            // Microphone button
+            _buildControlButton(
+              icon: _isMicOn ? Icons.mic : Icons.mic_off,
+              label: 'Mic',
+              isActive: _isMicOn,
+              onPressed: _toggleMic,
+            ),
+
+            // Camera button
+            _buildControlButton(
+              icon: _isCameraOn ? Icons.videocam : Icons.videocam_off,
+              label: 'Camera',
+              isActive: _isCameraOn,
+              onPressed: _toggleCamera,
+            ),
+
+            // End call button (red, larger)
+            _buildEndCallButton(),
+
+            // Speaker button
+            _buildControlButton(
+              icon: _isSpeakerOn ? Icons.volume_up : Icons.volume_off,
+              label: 'Loa',
+              isActive: _isSpeakerOn,
+              onPressed: _toggleSpeaker,
+            ),
+
+            // More options
+            _buildControlButton(
+              icon: Icons.more_vert,
+              label: 'Thêm',
+              isActive: true,
+              onPressed: () {
+                // TODO: Show more options
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControlButton({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+    required VoidCallback onPressed,
+  }) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onPressed,
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isActive 
+                    ? Colors.white.withOpacity(0.2) 
+                    : Colors.white.withOpacity(0.1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 10,
+                    spreadRadius: 1,
+                  ),
+                ],
+              ),
+              child: Icon(
+                icon,
+                color: isActive ? Colors.white : Colors.white54,
+                size: 28,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 12,
+            color: Colors.white70,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildIconButton({
+    required IconData icon,
+    required VoidCallback onPressed,
+    required String tooltip,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: const CircleBorder(),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: Colors.white.withOpacity(0.1),
+          ),
+          child: Icon(
+            icon,
+            color: Colors.white,
+            size: 24,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEndCallButton() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: _endCall,
+            customBorder: const CircleBorder(),
+            child: Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: const Color(0xFFEF4444),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFFEF4444).withOpacity(0.5),
+                    blurRadius: 20,
+                    spreadRadius: 2,
+                  ),
+                ],
+              ),
+              child: const Icon(
+                Icons.call_end,
+                color: Colors.white,
+                size: 32,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Kết thúc',
+          style: GoogleFonts.inter(
+            fontSize: 12,
+            color: Colors.white70,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildConnectionIndicator() {
+    if (!_isConnected) return const SizedBox.shrink();
+
+    Color indicatorColor;
+    IconData indicatorIcon;
+    String indicatorText;
+
+    switch (_connectionQuality) {
+      case 'good':
+        indicatorColor = Colors.green;
+        indicatorIcon = Icons.signal_cellular_4_bar;
+        indicatorText = 'Tốt';
+        break;
+      case 'moderate':
+        indicatorColor = Colors.orange;
+        indicatorIcon = Icons.signal_cellular_alt;
+        indicatorText = 'Trung bình';
+        break;
+      case 'poor':
+        indicatorColor = Colors.red;
+        indicatorIcon = Icons.signal_cellular_connected_no_internet_0_bar;
+        indicatorText = 'Yếu';
+        break;
+      default:
+        return const SizedBox.shrink();
+    }
+
+    return Positioned(
+      top: 60,
+      left: 20,
+      child: AnimatedOpacity(
+        opacity: _showControls && _connectionQuality != 'good' ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 300),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: indicatorColor.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: indicatorColor.withOpacity(0.5),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                indicatorIcon,
+                size: 16,
+                color: indicatorColor,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                indicatorText,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+

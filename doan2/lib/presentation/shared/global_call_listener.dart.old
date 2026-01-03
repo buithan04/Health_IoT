@@ -1,0 +1,255 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:app_iot/service/socket_service.dart';
+import 'package:app_iot/service/webrtc_service.dart';
+import 'package:app_iot/presentation/shared/webrtc_call_screen.dart';
+import 'package:app_iot/presentation/shared/incoming_call_dialog.dart';
+import 'package:app_iot/main.dart'; // For navigatorKey
+
+/// Global WebRTC Call Listener
+/// Lắng nghe incoming calls ở mọi màn hình trong app
+class GlobalCallListener extends StatefulWidget {
+  final Widget child;
+  
+  const GlobalCallListener({
+    Key? key,
+    required this.child,
+  }) : super(key: key);
+
+  @override
+  State<GlobalCallListener> createState() => _GlobalCallListenerState();
+}
+
+class _GlobalCallListenerState extends State<GlobalCallListener> {
+  final SocketService _socketService = SocketService();
+  StreamSubscription? _offerSubscription;
+  StreamSubscription? _iceCandidateSubscription;
+  StreamSubscription? _callEndedSubscription;
+  
+  // Track active incoming call to prevent duplicates
+  String? _activeIncomingCallerId;
+  bool _hasActiveDialog = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupGlobalCallListeners();
+  }
+
+  void _setupGlobalCallListeners() {
+    print('🌐 [GLOBAL] Setting up global call listeners...');
+    
+    // Listen for incoming call offers (GLOBAL - works everywhere)
+    _offerSubscription = _socketService.webrtcOfferStream.listen((data) {
+      if (!mounted) return;
+      
+      final fromUserId = data['from']?.toString() ?? '';
+      final fromName = data['fromName']?.toString() ?? 'Người dùng';
+      final fromAvatar = data['fromAvatar']?.toString();
+      final offer = data['offer'] as Map<String, dynamic>?;
+
+      if (offer == null || fromUserId.isEmpty) {
+        print('⚠️ [GLOBAL] Invalid offer data received');
+        return;
+      }
+      
+      // Prevent duplicate dialogs - check multiple conditions
+      if (_hasActiveDialog && _activeIncomingCallerId == fromUserId) {
+        print('⚠️ [GLOBAL] Already showing dialog for $fromUserId, ignoring duplicate');
+        return;
+      }
+      
+      // Prevent if already in any call
+      if (WebRTCService().isCallActive) {
+        print('⚠️ [GLOBAL] Already in a call, ignoring new incoming call');
+        return;
+      }
+
+      print('\n📞 [GLOBAL] ═══ INCOMING CALL OFFER ═══');
+      print('   From User ID: $fromUserId');
+      print('   From Name: $fromName');
+      print('   Context mounted: $mounted');
+      print('═══════════════════════════════════════════\n');
+      
+      // Mark as active
+      _activeIncomingCallerId = fromUserId;
+      _hasActiveDialog = true;
+
+      // Show incoming call dialog (full screen overlay)
+      _showGlobalIncomingCallDialog(
+        fromUserId: fromUserId,
+        fromName: fromName,
+        fromAvatar: fromAvatar,
+        offer: offer,
+      );
+    });
+
+    // NOTE: Answer handling is done in WebRTCService's internal listener
+    // to prevent duplicate processing and ensure proper state management
+
+    // Listen for ICE candidates
+    _iceCandidateSubscription = _socketService.webrtcIceCandidateStream.listen((data) {
+      final candidate = data['candidate'] as Map<String, dynamic>?;
+      if (candidate != null) {
+        WebRTCService().handleIceCandidate(candidate);
+      }
+    });
+
+    // Listen for call ended
+    _callEndedSubscription = _socketService.callRejectedStream.listen((data) {
+      final reason = data['reason']?.toString() ?? 'ended';
+      print('📴 [GLOBAL] Call ended/rejected - Reason: $reason');
+      
+      // Dismiss incoming call dialog if active
+      if (_hasActiveDialog) {
+        final navContext = navigatorKey.currentContext;
+        if (navContext != null) {
+          Navigator.of(navContext, rootNavigator: true).popUntil((route) {
+            // Pop until we're not in a dialog
+            return !route.toString().contains('DialogRoute');
+          });
+        }
+        _hasActiveDialog = false;
+        _activeIncomingCallerId = null;
+      }
+      
+      // Delay cleanup to let outgoing_call_screen handle dismissal first
+      Future.delayed(const Duration(milliseconds: 200), () {
+        // End call on WebRTC service side (if not already ended)
+        if (WebRTCService().isCallActive) {
+          WebRTCService().endCall(sendNotification: false);
+        }
+      });
+      
+      if (mounted) {
+        // Show different messages based on reason
+        String message;
+        switch (reason) {
+          case 'timeout':
+            message = '⏱️ Không có phản hồi';
+            break;
+          case 'rejected':
+            message = '❌ Cuộc gọi bị từ chối';
+            break;
+          case 'cancelled':
+            message = '📴 Cuộc gọi đã bị hủy';
+            break;
+          default:
+            message = '📴 Cuộc gọi đã kết thúc';
+        }
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    });
+
+    print('✅ [GLOBAL] Global call listeners setup complete');
+  }
+
+  void _showGlobalIncomingCallDialog({
+    required String fromUserId,
+    required String fromName,
+    String? fromAvatar,
+    required Map<String, dynamic> offer,
+  }) {
+    // Use global navigatorKey to show dialog
+    final context = navigatorKey.currentContext;
+    if (context == null) {
+      print('❌ [GLOBAL] No navigator context available');
+      return;
+    }
+
+    showIncomingCallDialog(
+      context: context,
+      callerName: fromName,
+      callerAvatar: fromAvatar,
+      onAccept: () async {
+        print('✅ [GLOBAL] User accepted call from $fromUserId');
+        
+        // Dialog will be closed by showIncomingCallDialog's onAccept callback
+        // Don't pop here to avoid double-pop error
+        
+        // Clear dialog tracking
+        _hasActiveDialog = false;
+        _activeIncomingCallerId = null;
+        
+        try {
+          // Accept the call
+          print('📞 [GLOBAL] Calling acceptCall()...');
+          final success = await WebRTCService().acceptCall(
+            offer: offer,
+            callerUserId: fromUserId,
+            callerUserName: fromName,
+            callerUserAvatar: fromAvatar,
+          );
+
+          print('📞 [GLOBAL] acceptCall() returned: $success');
+
+          if (success) {
+            // Navigate to call screen after dialog is closed
+            final currentContext = navigatorKey.currentContext;
+            if (currentContext != null) {
+              print('✅ [GLOBAL] Navigating to call screen...');
+              Navigator.of(currentContext).push(
+                MaterialPageRoute(
+                  builder: (_) => WebRTCCallScreen(
+                    remoteUserId: fromUserId,
+                    remoteUserName: fromName,
+                    remoteUserAvatar: fromAvatar,
+                    isOutgoingCall: false,
+                  ),
+                ),
+              );
+            } else {
+              print('❌ [GLOBAL] Navigator context is null');
+            }
+          } else {
+            print('❌ [GLOBAL] Failed to accept call');
+            final currentContext = navigatorKey.currentContext;
+            if (currentContext != null) {
+              ScaffoldMessenger.of(currentContext).showSnackBar(
+                const SnackBar(content: Text('❌ Không thể nhận cuộc gọi. Kiểm tra quyền camera/mic.')),
+              );
+            }
+          }
+        } catch (e, stackTrace) {
+          print('❌ [GLOBAL] Error accepting call: $e');
+          print('   Stack trace: $stackTrace');
+          final currentContext = navigatorKey.currentContext;
+          if (currentContext != null) {
+            ScaffoldMessenger.of(currentContext).showSnackBar(
+              SnackBar(content: Text('❌ Lỗi: ${e.toString()}')),
+            );
+          }
+        }
+      },
+      onDecline: () async {
+        print('❌ [GLOBAL] User declined call from $fromUserId');
+        
+        // Clear dialog tracking
+        _hasActiveDialog = false;
+        _activeIncomingCallerId = null;
+        
+        await WebRTCService().rejectCall(fromUserId);
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    print('🛑 [GLOBAL] Disposing global call listeners');
+    _offerSubscription?.cancel();
+    _iceCandidateSubscription?.cancel();
+    _callEndedSubscription?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
+  }
+}

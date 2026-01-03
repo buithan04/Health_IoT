@@ -1,0 +1,52 @@
+// HƯỚNG DẪN TÍCH HỢP INCOMING CALL HANDLER
+// ==========================================
+
+// BƯỚC 1: Import vào file main.dart hoặc home_screen.dart
+import 'package:app_iot/presentation/shared/incoming_call_handler.dart';
+
+// BƯỚC 2: Gọi hàm initialize trong initState() của màn hình chính
+// Ví dụ trong HomePage hoặc MainScreen:
+
+class HomeScreen extends StatefulWidget {
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  String _myUserId = "";
+  String _myUserName = "";
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserInfo();
+  }
+
+  Future<void> _loadUserInfo() async {
+    // Lấy thông tin user từ UserService hoặc ApiClient
+    final profile = await UserService(ApiClient()).getUserProfile();
+    
+    if (profile != null) {
+      setState(() {
+        _myUserId = profile.id.toString();
+        _myUserName = profile.fullName ?? "Người dùng";
+      });
+
+      // ✅ KHỞI TẠO LISTENER CHO INCOMING CALL
+      if (mounted) {
+        IncomingCallHandler.initialize(context, _myUserId, _myUserName);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Widget của bạn...
+  }
+}
+
+// ==========================================
+// LƯU Ý:
+// - Chỉ gọi initialize() MỘT LẦN trong màn hình chính
+// - Đảm bảo SocketService đã connect trước khi gọi
+// - Nếu dùng navigation routes, có thể đặt trong MaterialApp builder
