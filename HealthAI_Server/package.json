@@ -1,7 +1,7 @@
 {
   "name": "health-ai-server",
   "version": "1.0.0",
-  "description": "API Server cho dự án AI Y tế với Node.js, MySQL, và TensorFlow.js",
+  "description": "API Server cho dự án AI Y tế với Node.js, PostgreSQL/TimescaleDB, và TensorFlow.js",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",

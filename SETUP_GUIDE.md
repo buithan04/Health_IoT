@@ -4,7 +4,8 @@
 
 ### 1. Backend (HealthAI_Server)
 - Node.js 16+ và npm
-- MySQL 8.0+
+- PostgreSQL 14+ hoặc TimescaleDB 2.0+
+- pgAdmin 4 (recommended for database management)
 - Git
 
 ### 2. Admin Portal
@@ -45,12 +46,12 @@ npm install
 Tạo file `.env` trong thư mục `HealthAI_Server/`:
 
 ```env
-# Database Configuration
+# Database Configuration (PostgreSQL/TimescaleDB)
 DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=your_mysql_password
-DB_NAME=healthai_db
-DB_PORT=3306
+DB_USER=postgres
+DB_PASSWORD=your_postgres_password
+DB_NAME=health_db
+DB_PORT=5432
 
 # Server Configuration
 PORT=3000
@@ -87,15 +88,30 @@ MQTT_PASSWORD=
 
 ### 2.4. Tạo Database
 
+**Sử dụng pgAdmin:**
+1. Mở pgAdmin 4
+2. Connect tới PostgreSQL server
+3. Right-click "Databases" → Create → Database
+4. Đặt tên: `health_db`
+5. Encoding: UTF8
+6. Click "Save"
+
+**Hoặc sử dụng psql command line:**
 ```bash
-# Đăng nhập MySQL
-mysql -u root -p
+# Đăng nhập PostgreSQL
+psql -U postgres
 
 # Tạo database
-CREATE DATABASE healthai_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE health_db WITH ENCODING 'UTF8';
 
-# Thoát MySQL
-exit;
+# Kết nối vào database
+\c health_db
+
+# (Optional) Enable TimescaleDB extension
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+# Thoát
+\q
 ```
 
 ### 2.5. Chạy Migrations
@@ -289,14 +305,27 @@ curl -X POST http://localhost:3000/api/auth/login \
    - Doctor Management
    - Appointments
 
-### 6.3. Test Mobile App
+### 6.3. Test Mobile AppPostgreSQL**
+```bash
+# Kiểm tra PostgreSQL đang chạy
+# Windows:
+# Check services hoặc:
+pg_ctl -D "C:\Program Files\PostgreSQL\14\data" status
 
-1. Login với tài khoản patient
-2. Kiểm tra:
-   - Health monitoring
-   - Appointment booking
-   - Video call với doctor
-   - Chat
+# Linux:
+sudo systemctl status postgresql
+sudo systemctl start postgresql
+
+# macOS:
+brew services start postgresql
+```
+
+**Lỗi: Password authentication failed**
+- Kiểm tra password trong file .env
+- Reset password PostgreSQL nếu cần:
+```bash
+# Windows: mở psql với user postgres, sau đó:
+ALTER USER postgres WITH PASSWORD 'new_password';
 
 ---
 

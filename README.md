@@ -2,7 +2,8 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter)](https://flutter.dev)
 [![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=node.js)](https://nodejs.org)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?logo=postgresql)](https://www.postgresql.org)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-336791?logo=postgresql)](https://www.postgresql.org)
+[![TimescaleDB](https://img.shields.io/badge/TimescaleDB-2.0+-FDB515?logo=timescale)](https://www.timescale.com)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Hệ thống quản lý sức khỏe toàn diện với các tính năng:
@@ -50,9 +51,10 @@ Hướng dẫn bao gồm:
 ## 🔧 Yêu Cầu Hệ Thống
 
 ### Backend
-- **Node.js**: >= 20.x
-- **PostgreSQL**: >= 16.x
-- **Redis** (optional): >= 7.x cho caching
+- **Node.js**: >= 16.x
+- **PostgreSQL**: >= 14.x hoặc **TimescaleDB**: >= 2.0
+- **pgAdmin**: 4+ (recommended for database management)
+- **Redis** (optional): >= 7.x for caching
 
 ### Mobile App
 - **Flutter SDK**: >= 3.24.0

@@ -2,11 +2,12 @@
 
 <div align="center">
 
-![Node.js](https://img.shields.io/badge/Node.js-20.x-green)
-![Express](https://img.shields.io/badge/Express-4.18-blue)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue)
-![Socket.IO](https://img.shields.io/badge/Socket.IO-4.6-black)
-![TensorFlow.js](https://img.shields.io/badge/TensorFlow.js-4.15-orange)
+![Node.js](https://img.shields.io/badge/Node.js-16+-green)
+![Express](https://img.shields.io/badge/Express-4.19-blue)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-blue)
+![TimescaleDB](https://img.shields.io/badge/TimescaleDB-2.0+-FDB515)
+![Socket.IO](https://img.shields.io/badge/Socket.IO-4.8-black)
+![TensorFlow.js](https://img.shields.io/badge/TensorFlow.js-4.22-orange)
 
 **RESTful API Server with AI/ML, Real-time Communication, and IoT Integration**
 
