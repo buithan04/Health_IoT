@@ -1,12 +1,36 @@
 const admin = require("firebase-admin");
-const serviceAccount = require("../config/serviceAccountKey.json");
 const { pool } = require('../config/db');
+const path = require('path');
+const fs = require('fs');
 
-admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-});
+// Initialize Firebase Admin SDK if serviceAccountKey.json exists
+const serviceAccountPath = path.join(__dirname, '../config/serviceAccountKey.json');
+let firebaseInitialized = false;
+
+if (fs.existsSync(serviceAccountPath)) {
+    try {
+        const serviceAccount = require("../config/serviceAccountKey.json");
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+        firebaseInitialized = true;
+        console.log('✅ Firebase Admin SDK initialized');
+    } catch (error) {
+        console.warn('⚠️ Firebase initialization error:', error.message);
+    }
+} else {
+    console.warn('⚠️ serviceAccountKey.json not found. Push notifications will be disabled.');
+    console.warn('💡 To enable push notifications:');
+    console.warn('   1. Download your Firebase service account key');
+    console.warn('   2. Save it as: HealthAI_Server/config/serviceAccountKey.json');
+}
 
 const sendPushNotification = async (userId, title, body, data = {}) => {
+    if (!firebaseInitialized) {
+        console.log('⚠️ Push notification skipped: Firebase not initialized');
+        return { success: false, reason: 'Firebase not initialized' };
+    }
+
     try {
         // 1. Lấy Token của User từ Database
         const res = await pool.query("SELECT fcm_token FROM users WHERE id = $1", [userId]);

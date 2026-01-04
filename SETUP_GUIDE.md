@@ -78,13 +78,21 @@ MQTT_PASSWORD=
 # Tạo file serviceAccountKey.json riêng (xem bước 2.3)
 ```
 
-### 2.3. Setup Firebase Service Account
+### 2.3. Setup Firebase Service Account (Optional - for Push Notifications)
+
+**Nếu bạn muốn bật push notifications:**
 
 1. Vào [Firebase Console](https://console.firebase.google.com/)
 2. Chọn project của bạn
 3. Project Settings > Service Accounts
-4. Generate New Private Key
+4. Click "Generate New Private Key"
 5. Lưu file JSON vào `HealthAI_Server/config/serviceAccountKey.json`
+
+**Nếu không cần push notifications:**
+- Server vẫn chạy bình thường, chỉ bỏ qua push notifications
+- Sẽ có cảnh báo: "Push notification skipped: Firebase not initialized"
+
+> **⚠️ Lưu ý:** File `serviceAccountKey.json` đã được thêm vào `.gitignore` và sẽ không được push lên Git (chứa credentials).
 
 ### 2.4. Tạo Database
 
