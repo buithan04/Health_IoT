@@ -38,6 +38,12 @@ const createManualPatchedHandler = async (modelJsonPath) => {
             delete inputLayerConfig.batch_shape;
         }
 
+        // Patch 1.5: Loại bỏ training_config nếu gây lỗi (Keras 3.x)
+        if (topology.training_config) {
+            console.log(`[Manual Handler] ...Patch 1.5: Loại bỏ training_config (Keras 3.x compatibility)`);
+            delete topology.training_config;
+        }
+
         // 3. XỬ LÝ WEIGHTS MANIFEST (Hỗ trợ nhiều nhóm manifest)
         // Thay vì chỉ lấy [0], ta gộp tất cả các nhóm lại.
         const manifests = originalArtifacts.weightsManifest;
@@ -115,8 +121,8 @@ const loadAllModels = async () => {
         console.log("Đang tải mô hình và scalers (sử dụng @tensorflow/tfjs-node)...");
 
         // --- 1. Định nghĩa đường dẫn HỆ THỐNG TỆP (KHÔNG 'file://') ---
-        const ecgModelPath = path.join(__dirname, '../models/tfjs_ecg_model/model_ecg.json');
-        const mlpModelPath = path.join(__dirname, '../models/tfjs_mlp_model/model_mlp.json');
+        const ecgModelPath = path.join(__dirname, '../models/tfjs_ecg_model/model.json');
+        const mlpModelPath = path.join(__dirname, '../models/tfjs_mlp_model/model.json');
 
         // Đường dẫn Scaler
         const scalerEcgPath = path.join(__dirname, '../models/scaler_ecg.json');
@@ -143,18 +149,15 @@ const loadAllModels = async () => {
         models.risk_encoder = JSON.parse(encoderData);
         console.log("Tải scalers/encoder thành công.");
 
-        // 2. Tải Model ECG
-        // (LƯU Ý: await createManualPatchedHandler vì nó là hàm async)
-        console.log("2. Đang tải mô hình ECG...");
-        const ecgHandler = await createManualPatchedHandler(ecgModelPath);
-        models.model_ecg = await tf.loadLayersModel(ecgHandler);
-        console.log("Tải ECG model thành công.");
+        // 2. Tải Model ECG (graph-model format)
+        console.log("2. Đang tải mô hình ECG (graph-model)...");
+        models.model_ecg = await tf.loadGraphModel(`file://${ecgModelPath}`);
+        console.log("   ✅ ECG model loaded successfully");
 
-        // 3. Tải Model MLP
-        console.log("3. Đang tải mô hình MLP...");
-        const mlpHandler = await createManualPatchedHandler(mlpModelPath);
-        models.model_mlp = await tf.loadLayersModel(mlpHandler);
-        console.log("Tải MLP model thành công.");
+        // 3. Tải Model MLP (graph-model format)
+        console.log("3. Đang tải mô hình MLP (graph-model)...");
+        models.model_mlp = await tf.loadGraphModel(`file://${mlpModelPath}`);
+        console.log("   ✅ MLP model loaded successfully");
 
         console.log("--- Tải mô hình và scalers THÀNH CÔNG! ---");
 

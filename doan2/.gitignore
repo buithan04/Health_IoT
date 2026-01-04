@@ -35,6 +35,10 @@ migrate_working_dir/
 /coverage/
 /exportToHTML/
 
+# Test files
+*.test.dart
+flutter_*.png
+
 # Don't commit pubspec.lock for libraries, but DO commit for applications
 # Uncomment the next line if this is a library
 # pubspec.lock

@@ -7,17 +7,35 @@
 BEGIN;
 
 -- ====================================================================
--- CLEAR EXISTING DATA - Xóa tất cả dữ liệu cũ trước khi seed
+-- CLEAR EXISTING DATA - Xóa dữ liệu test, giữ user quan trọng (ID: 1, 9, 10)
 -- ====================================================================
-TRUNCATE TABLE 
-    medication_ingredients, prescription_items, prescriptions,
-    medications, medication_categories, manufacturers, active_ingredients,
-    appointments, appointment_types, health_records, ecg_readings, ai_diagnoses,
-    mqtt_health_data, medical_attachments, messages, conversations, participants,
-    notifications, medication_reminders, articles, doctor_reviews, doctor_time_off,
-    doctor_notes, doctor_schedules, patient_thresholds, patient_health_info,
-    doctor_professional_info, profiles, users
-RESTART IDENTITY CASCADE;
+-- Xóa dữ liệu liên quan trước (giữ user 1, 9, 10)
+DELETE FROM prescription_items WHERE prescription_id IN (SELECT id FROM prescriptions WHERE patient_id NOT IN (1, 9, 10));
+DELETE FROM prescriptions WHERE patient_id NOT IN (1, 9, 10);
+DELETE FROM appointments WHERE patient_id NOT IN (1, 9, 10) OR doctor_id NOT IN (1, 9, 10);
+DELETE FROM health_records WHERE user_id NOT IN (1, 9, 10);
+DELETE FROM ecg_readings WHERE user_id NOT IN (1, 9, 10);
+DELETE FROM ai_diagnoses WHERE user_id NOT IN (1, 9, 10);
+DELETE FROM mqtt_health_data WHERE user_id NOT IN (1, 9, 10);
+DELETE FROM medical_attachments WHERE user_id NOT IN (1, 9, 10);
+DELETE FROM messages WHERE sender_id NOT IN (1, 9, 10);
+DELETE FROM conversations WHERE id NOT IN (SELECT conversation_id FROM participants WHERE user_id IN (1, 9, 10));
+DELETE FROM participants WHERE user_id NOT IN (1, 9, 10);
+DELETE FROM notifications WHERE user_id NOT IN (1, 9, 10);
+DELETE FROM medication_reminders WHERE user_id NOT IN (1, 9, 10);
+DELETE FROM doctor_reviews WHERE patient_id NOT IN (1, 9, 10) OR doctor_id NOT IN (1, 9, 10);
+DELETE FROM doctor_time_off WHERE doctor_id NOT IN (1, 9, 10);
+DELETE FROM doctor_notes WHERE doctor_id NOT IN (1, 9, 10);
+DELETE FROM doctor_schedules WHERE user_id NOT IN (1, 9, 10);
+DELETE FROM patient_thresholds WHERE user_id NOT IN (1, 9, 10);
+DELETE FROM appointment_types WHERE doctor_id NOT IN (1, 9, 10);
+DELETE FROM doctor_professional_info WHERE doctor_id NOT IN (1, 9, 10);
+
+-- Xóa test users (giữ ID 1 admin, ID 9 test patient, ID 10 user thật)
+DELETE FROM users WHERE id NOT IN (1, 9, 10) AND role IN ('doctor', 'patient');
+
+-- Xóa toàn bộ medications và categories để seed lại
+TRUNCATE TABLE medication_ingredients, medications, medication_categories, manufacturers, active_ingredients, articles RESTART IDENTITY CASCADE;
 
 -- ====================================================================
 -- SEED USERS (Admin, Doctors, Patients)
@@ -42,10 +60,15 @@ INSERT INTO users (id, email, password, role, is_verified, created_at) OVERRIDIN
 (8, 'doctor7@healthai.com', '$2b$10$EJHqII/yOJw7HOnMfYMif.X0HHiBZIduUoQn88BZjNhlltPgtrYVW', 'doctor', TRUE, NOW())
 ON CONFLICT (email) DO NOTHING;
 
--- Patient user (id: 9)
+-- Patient test users (id: 9, 11-13) - Patients để test AI diagnosis
 INSERT INTO users (id, email, password, role, is_verified, created_at) OVERRIDING SYSTEM VALUE VALUES
-(9, 'patient@healthai.com', '$2b$10$EJHqII/yOJw7HOnMfYMif.X0HHiBZIduUoQn88BZjNhlltPgtrYVW', 'patient', TRUE, NOW())
+(9, 'patient@healthai.com', '$2b$10$EJHqII/yOJw7HOnMfYMif.X0HHiBZIduUoQn88BZjNhlltPgtrYVW', 'patient', TRUE, NOW()),
+(11, 'patient2@healthai.com', '$2b$10$EJHqII/yOJw7HOnMfYMif.X0HHiBZIduUoQn88BZjNhlltPgtrYVW', 'patient', TRUE, NOW()),
+(12, 'patient3@healthai.com', '$2b$10$EJHqII/yOJw7HOnMfYMif.X0HHiBZIduUoQn88BZjNhlltPgtrYVW', 'patient', TRUE, NOW()),
+(13, 'patient4@healthai.com', '$2b$10$EJHqII/yOJw7HOnMfYMif.X0HHiBZIduUoQn88BZjNhlltPgtrYVW', 'patient', TRUE, NOW())
 ON CONFLICT (email) DO NOTHING;
+
+-- NOTE: User ID 1 (admin), 9 (test patient) và 10 (real user) được preserve
 
 -- Reset sequence
 SELECT setval('users_id_seq', (SELECT MAX(id) FROM users));
@@ -55,16 +78,29 @@ SELECT setval('users_id_seq', (SELECT MAX(id) FROM users));
 -- ====================================================================
 
 INSERT INTO profiles (user_id, full_name, phone_number, date_of_birth, gender, address) VALUES
-(1, 'Quản trị viên', '0901234567', '1990-01-01', 'Nam', 'Hà Nội, Việt Nam'),
-(2, 'BS. Nguyễn Văn An', '0912345671', '1980-05-15', 'Nam', 'Hà Nội'),
-(3, 'BS. Trần Thị Bình', '0912345672', '1985-08-20', 'Nữ', 'TP.HCM'),
-(4, 'BS. Lê Văn Cường', '0912345673', '1978-03-10', 'Nam', 'Đà Nẵng'),
-(5, 'BS. Phạm Thị Dung', '0912345674', '1988-11-25', 'Nữ', 'Hà Nội'),
-(6, 'BS. Hoàng Văn Em', '0912345675', '1982-07-18', 'Nam', 'Cần Thơ'),
-(7, 'BS. Đỗ Thị Phương', '0912345676', '1990-02-28', 'Nữ', 'Hải Phòng'),
-(8, 'BS. Vũ Văn Giang', '0912345677', '1975-12-05', 'Nam', 'Huế'),
-(9, 'Nguyễn Văn Test', '0987654321', '1995-06-15', 'Nam', '123 Nguyễn Trãi, Hà Nội')
+(1, 'Quản trị viên', '0901234567', '1990-01-01', 'Male', 'Hà Nội, Việt Nam'),
+(2, 'BS. Nguyễn Văn An', '0912345671', '1980-05-15', 'Male', 'Hà Nội'),
+(3, 'BS. Trần Thị Bình', '0912345672', '1985-08-20', 'Female', 'TP.HCM'),
+(4, 'BS. Lê Văn Cường', '0912345673', '1978-03-10', 'Male', 'Đà Nẵng'),
+(5, 'BS. Phạm Thị Dung', '0912345674', '1988-11-25', 'Female', 'Hà Nội'),
+(6, 'BS. Hoàng Văn Em', '0912345675', '1982-07-18', 'Male', 'Cần Thơ'),
+(7, 'BS. Đỗ Thị Phương', '0912345676', '1990-02-28', 'Female', 'Hải Phòng'),
+(8, 'BS. Vũ Văn Giang', '0912345677', '1975-12-05', 'Male', 'Huế'),
+(9, 'Nguyễn Văn Test', '0987654321', '1995-06-15', 'Male', '123 Nguyễn Trãi, Hà Nội'),
+(11, 'Lê Văn Hùng', '0987654323', '1988-11-10', 'Male', '789 Trần Phú, Đà Nẵng'),
+(12, 'Phạm Thị Lan', '0987654324', '1998-07-25', 'Female', '321 Hoàng Diệu, Hà Nội'),
+(13, 'Hoàng Văn Nam', '0987654325', '1985-12-05', 'Male', '654 Nguyễn Huệ, Cần Thơ')
 ON CONFLICT (user_id) DO NOTHING;
+
+-- Cập nhật profile cho User ID 10 (buithan160904@gmail.com - Real user)
+INSERT INTO profiles (user_id, full_name, phone_number, date_of_birth, gender, address) VALUES
+(10, 'Bùi Thân', '0987654322', '2004-09-16', 'Male', 'Hà Nội, Việt Nam')
+ON CONFLICT (user_id) DO UPDATE SET
+    full_name = EXCLUDED.full_name,
+    phone_number = EXCLUDED.phone_number,
+    date_of_birth = EXCLUDED.date_of_birth,
+    gender = EXCLUDED.gender,
+    address = EXCLUDED.address;
 
 -- ====================================================================
 -- SEED DOCTOR PROFESSIONAL INFO
@@ -81,12 +117,43 @@ INSERT INTO doctor_professional_info (doctor_id, specialty, hospital_name, years
 ON CONFLICT (doctor_id) DO NOTHING;
 
 -- ====================================================================
--- SEED PATIENT HEALTH INFO
+-- SEED PATIENT HEALTH INFO - Đầy đủ thông tin cho AI diagnosis
 -- ====================================================================
 
-INSERT INTO patient_health_info (patient_id, height, weight, blood_type, allergies, emergency_contact_name, emergency_contact_phone) VALUES
-(9, 175, 70, 'A', 'Không', 'Nguyễn Văn B', '0123456789')
-ON CONFLICT (patient_id) DO NOTHING;
+INSERT INTO patient_health_info (patient_id, height, weight, blood_type, allergies, emergency_contact_name, emergency_contact_phone, medical_history, occupation) VALUES
+-- Admin (user 1): Thông tin cơ bản để test AI
+(1, 170.0, 68.0, 'O', 'Không', 'Admin Contact', '0901234567', 'Khỏe mạnh', 'Quản trị viên'),
+-- Patient 9: Nam, 30 tuổi, cân nặng bình thường
+(9, 175.0, 70.0, 'A', 'Không', 'Nguyễn Văn B', '0123456789', 'Khỏe mạnh', 'Kỹ sư phần mềm'),
+-- Patient 11: Nam, 36 tuổi, thừa cân
+(11, 170.0, 85.0, 'O', 'Không', 'Lê Thị D', '0123456791', 'Tiền sử tăng huyết áp', 'Kinh doanh'),
+-- Patient 12: Nữ, 26 tuổi, cân nặng bình thường
+(12, 158.0, 50.0, 'AB', 'Hải sản', 'Phạm Văn E', '0123456792', 'Dị ứng hải sản', 'Nhân viên văn phòng'),
+-- Patient 13: Nam, 39 tuổi, cân nặng bình thường
+(13, 168.0, 72.0, 'A', 'Không', 'Hoàng Thị F', '0123456793', 'Tiền sử tiểu đường type 2', 'Tài xế')
+ON CONFLICT (patient_id) DO UPDATE SET
+    height = EXCLUDED.height,
+    weight = EXCLUDED.weight,
+    blood_type = EXCLUDED.blood_type,
+    allergies = EXCLUDED.allergies,
+    emergency_contact_name = EXCLUDED.emergency_contact_name,
+    emergency_contact_phone = EXCLUDED.emergency_contact_phone,
+    medical_history = EXCLUDED.medical_history,
+    occupation = EXCLUDED.occupation;
+
+-- Cập nhật health info cho User ID 10 (buithan160904@gmail.com - Real user)
+-- Nam, 20 tuổi (sinh 2004-09-16), chiều cao và cân nặng trung bình
+INSERT INTO patient_health_info (patient_id, height, weight, blood_type, allergies, emergency_contact_name, emergency_contact_phone, medical_history, occupation) VALUES
+(10, 170.0, 65.0, 'O', 'Không', 'Gia đình', '0987654321', 'Khỏe mạnh', 'Sinh viên')
+ON CONFLICT (patient_id) DO UPDATE SET
+    height = EXCLUDED.height,
+    weight = EXCLUDED.weight,
+    blood_type = EXCLUDED.blood_type,
+    allergies = EXCLUDED.allergies,
+    emergency_contact_name = EXCLUDED.emergency_contact_name,
+    emergency_contact_phone = EXCLUDED.emergency_contact_phone,
+    medical_history = EXCLUDED.medical_history,
+    occupation = EXCLUDED.occupation;
 
 -- ====================================================================
 -- SEED MEDICATION CATEGORIES

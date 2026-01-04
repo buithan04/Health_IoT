@@ -25,7 +25,7 @@ const initSocket = (server) => {
         });
     });
 
-    io.on('connection', (socket) => {
+    io.on('connection', async (socket) => {
         // Log khi user kết nối để debug
         const userId = socket.user.id.toString(); // Chuyển luôn sang String để đồng nhất
         console.log(`\n${'='.repeat(60)}`);
@@ -37,6 +37,39 @@ const initSocket = (server) => {
 
         onlineUsers.set(userId, socket.id);
         io.emit('user_status_change', { userId, isOnline: true });
+
+        // Kiểm tra dữ liệu gần đây (trong 30 giây) để xác định trạng thái ban đầu
+        try {
+            const recentDataQuery = await pool.query(
+                `SELECT MAX(measured_at) as last_activity 
+                 FROM (
+                     SELECT measured_at FROM health_records WHERE user_id = $1
+                     UNION ALL
+                     SELECT measured_at FROM ecg_readings WHERE user_id = $1
+                 ) combined`,
+                [userId]
+            );
+
+            const lastActivity = recentDataQuery.rows[0]?.last_activity;
+            if (lastActivity) {
+                const secondsSinceLastActivity = (new Date() - new Date(lastActivity)) / 1000;
+                if (secondsSinceLastActivity <= 30) {
+                    // Có dữ liệu trong 30 giây → emit online ngay
+                    socket.emit('mqtt_data_activity', {
+                        type: 'initial_check',
+                        timestamp: lastActivity,
+                        secondsAgo: Math.round(secondsSinceLastActivity)
+                    });
+                    console.log(`✅ [STATUS] User ${userId} has recent data (${Math.round(secondsSinceLastActivity)}s ago) - Setting ONLINE`);
+                } else {
+                    console.log(`⏳ [STATUS] User ${userId} last data: ${Math.round(secondsSinceLastActivity)}s ago - Waiting for new data`);
+                }
+            } else {
+                console.log(`⏳ [STATUS] User ${userId} has no data yet - Waiting for first data`);
+            }
+        } catch (error) {
+            console.error('❌ [STATUS] Error checking initial data status:', error.message);
+        }
 
         socket.on('join_conversation', (data, ack) => {
             // Ép kiểu sang String để đảm bảo room "10" (string) và 10 (int) là một
@@ -555,7 +588,7 @@ const initSocket = (server) => {
             try {
                 const fcmService = require('./services/fcm_service');
                 const callType = isVideoCall ? '📹 Cuộc gọi video' : '📞 Cuộc gọi thoại';
-                
+
                 await fcmService.sendPushNotification(
                     targetUserId,
                     `${callType} từ ${callerName}`,
@@ -573,7 +606,7 @@ const initSocket = (server) => {
             } catch (err) {
                 console.error(`   ⚠️ Error sending FCM:`, err);
             }
-                
+
             // Lưu call history
             try {
                 await callHistoryService.saveCallHistory({
@@ -590,7 +623,7 @@ const initSocket = (server) => {
             } catch (err) {
                 console.error(`   ⚠️ Error saving call history:`, err);
             }
-            
+
             console.log(`${'='.repeat(60)}\n`);
         });
 
@@ -612,7 +645,7 @@ const initSocket = (server) => {
                     acceptedBy: socket.user.id.toString()
                 });
                 console.log(`   ✅ Acceptance notification sent`);
-                
+
                 // Cập nhật call history
                 try {
                     await callHistoryService.updateCallStatus(callId, 'connected');
@@ -642,11 +675,11 @@ const initSocket = (server) => {
                     declinedBy: socket.user.id.toString()
                 });
                 console.log(`   ✅ Decline notification sent`);
-                
+
                 // Cập nhật call history
                 try {
                     await callHistoryService.updateCallStatus(
-                        callId, 
+                        callId,
                         'declined',
                         null,
                         new Date()
@@ -679,7 +712,7 @@ const initSocket = (server) => {
                 });
                 console.log(`   ✅ End notification sent`);
             }
-            
+
             // Cập nhật call history với duration
             try {
                 const status = duration > 0 ? 'completed' : 'cancelled';
@@ -693,7 +726,7 @@ const initSocket = (server) => {
             } catch (err) {
                 console.error(`   ⚠️ Error updating call history:`, err);
             }
-            
+
             console.log(`${'='.repeat(60)}\n`);
         });
     });

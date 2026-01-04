@@ -9,8 +9,28 @@ import 'package:app_iot/models/patient/health_stat_model.dart'; // <--- IMPORT M
 const Color kPrimaryColor = Color(0xFF0F766E); // Teal 700
 const Color kBackgroundColor = Color(0xFFF8FAFC); // Slate 50
 
+// ============================================================================= 
+// TODO: CẦN THÊM API CHO THỐNG KÊ SỨC KHỎE
+// ============================================================================= 
+// Hiện tại đang dùng mock data. Cần implement:
+// 
+// Backend API endpoints:
+// - GET /api/health-records/stats?user_id={id}&period={day|week|month}&type={heartRate|spo2|temperature}
+// - Response: { data: [{timestamp, value}], average, min, max, trend }
+//
+// Frontend service:
+// - Tạo HealthStatsService với methods:
+//   * Future<List<HealthDataPoint>> getHealthStats(String type, String period)
+//   * Future<HealthSummary> getHealthSummary(String period)
+//
+// Integration:
+// - Thay generateMockData() bằng HealthStatsService().getHealthStats()
+// - Thêm loading state và error handling
+// - Cache data để giảm API calls
+// ============================================================================= 
+
 // Hàm giả lập dữ liệu (Mock Data Generator)
-// Trong thực tế, hàm này nên nằm ở một Service riêng (VD: HealthService)
+// TEMPORARY: Sẽ được thay thế bằng API call thực
 List<HealthDataPoint> generateMockData(String type, String period) {
   final now = DateTime.now();
   final random = Random();

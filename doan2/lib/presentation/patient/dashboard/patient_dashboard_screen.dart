@@ -5,12 +5,13 @@ import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 
 // Import Core, Service & Models
 import 'package:app_iot/core/api/api_client.dart';
 import 'package:app_iot/service/user_service.dart';
 import 'package:app_iot/service/mqtt_service.dart';
-import 'package:app_iot/models/patient/health_model.dart'; // <--- IMPORT QUAN TRỌNG
+import 'package:app_iot/models/patient/health_model.dart'; // <--- IMPORT QUAN TRỌNG (includes AIDiagnosis)
 import 'package:app_iot/models/common/user_model.dart'; // <--- IMPORT USER MODEL
 import 'package:app_iot/core/constants/app_config.dart';
 import 'package:app_iot/core/responsive/responsive.dart';
@@ -67,7 +68,10 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
   }
 
   void _initDashboard() async {
-    await _mqttService.connect();
+    // Connect MQTT in background (không block UI)
+    _mqttService.connect().catchError((error) {
+      print("⚠️ MQTT connection error: $error");
+    });
 
     try {
       // Lấy số lượng thông báo chưa đọc
@@ -324,24 +328,58 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
                               return Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        Icons.circle,
-                                        color: _mqttService.isConnected ? Colors.green : Colors.red,
-                                        size: 12,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        _mqttService.isConnected
-                                            ? "Live: Đang nhận dữ liệu"
-                                            : "Offline: Mất kết nối",
-                                        style: GoogleFonts.inter(
-                                          color: _mqttService.isConnected ? Colors.green : Colors.red,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
+                                  // Connection Status với realtime từ Socket
+                                  StreamBuilder<bool>(
+                                    stream: _socketService.connectionStatusStream,
+                                    initialData: false,
+                                    builder: (context, connectionSnapshot) {
+                                      final isOnline = connectionSnapshot.data ?? false;
+                                      return Row(
+                                        children: [
+                                          Icon(
+                                            Icons.circle,
+                                            color: isOnline ? Colors.green : Colors.red,
+                                            size: 12,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            isOnline
+                                                ? "Online: Đang nhận dữ liệu từ cảm biến"
+                                                : "Offline: Không có dữ liệu mới",
+                                            style: GoogleFonts.inter(
+                                              color: isOnline ? Colors.green : Colors.red,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          if (isOnline)
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.green.withOpacity(0.1),
+                                                borderRadius: BorderRadius.circular(12),
+                                                border: Border.all(color: Colors.green.withOpacity(0.3)),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(Icons.sensors, size: 10, color: Colors.green),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    "Realtime",
+                                                    style: GoogleFonts.inter(
+                                                      color: Colors.green,
+                                                      fontSize: 10,
+                                                      fontWeight: FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                        ],
+                                      );
+                                    },
                                   ),
                                   const SizedBox(height: 10),
                                   const _SectionTitle(title: 'Sức khỏe hôm nay'),
@@ -353,7 +391,27 @@ class _PatientDashboardScreenState extends State<PatientDashboardScreen> {
                           ),
 
                           const SizedBox(height: 24),
-                          const _EcgChartCard(),
+                          
+                          // AI Diagnosis Card (hiển thị kết quả chẩn đoán)
+                          StreamBuilder<Map<String, dynamic>>(
+                            stream: _socketService.aiDiagnosisStream,
+                            builder: (context, diagnosisSnapshot) {
+                              if (!diagnosisSnapshot.hasData) {
+                                return const SizedBox.shrink();
+                              }
+
+                              final diagnosisData = diagnosisSnapshot.data!;
+                              final diagnosis = AIDiagnosis.fromJson(diagnosisData);
+
+                              return _AIDiagnosisCard(diagnosis: diagnosis);
+                            },
+                          ),
+                          const SizedBox(height: 24),
+                          
+                          _EcgChartCard(
+                            mqttService: _mqttService,
+                            connectionStatusStream: _socketService.connectionStatusStream,
+                          ),
                           const SizedBox(height: 24),
                           const _SectionTitle(title: 'Tính năng'),
                           const SizedBox(height: 16),
@@ -642,27 +700,535 @@ class _StatCard extends StatelessWidget {
 // Bạn copy lại phần code của các widget này từ file cũ vào đây là được.
 // Chú ý: Nhớ copy class _EcgChartCard, _FeaturesGrid, v.v... vào cuối file này.
 class _EcgChartCard extends StatelessWidget {
-  const _EcgChartCard();
+  final MqttService mqttService;
+  final Stream<bool> connectionStatusStream;
+  const _EcgChartCard({required this.mqttService, required this.connectionStatusStream});
+  
   @override
   Widget build(BuildContext context) {
-    final List<FlSpot> ecgPoints = [
-      const FlSpot(0, 0), const FlSpot(0.5, 0), const FlSpot(1.0, 0.2), const FlSpot(1.5, 0), const FlSpot(1.8, -0.2),
-      const FlSpot(2.0, 2.5), const FlSpot(2.2, -0.5), const FlSpot(2.5, 0), const FlSpot(3.0, 0.3), const FlSpot(3.5, 0),
-      const FlSpot(4.0, 0), const FlSpot(4.5, 0), const FlSpot(5.0, 0.2), const FlSpot(5.5, 0), const FlSpot(5.8, -0.2),
-      const FlSpot(6.0, 2.4), const FlSpot(6.2, -0.5), const FlSpot(6.5, 0), const FlSpot(7.0, 0.3), const FlSpot(7.5, 0), const FlSpot(8.0, 0),
-    ];
-    return Card(
-      elevation: 4, shadowColor: Colors.black.withOpacity(0.05), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(children: [
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Row(children: [Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)), child: Icon(Icons.monitor_heart_outlined, color: Colors.green.shade600)), const SizedBox(width: 12), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Điện tâm đồ (ECG)', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16)), Text('Cập nhật 1 phút trước', style: GoogleFonts.inter(fontSize: 12, color: Colors.grey))])]),
-            Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), decoration: BoxDecoration(color: Colors.green.shade100, borderRadius: BorderRadius.circular(20)), child: Text('Bình thường', style: GoogleFonts.inter(color: Colors.green.shade800, fontSize: 12, fontWeight: FontWeight.bold))),
-          ]),
-          const SizedBox(height: 24),
-          SizedBox(height: 150, child: LineChart(LineChartData(gridData: const FlGridData(show: false), titlesData: const FlTitlesData(show: false), borderData: FlBorderData(show: false), minX: 0, maxX: 8, minY: -1, maxY: 3, lineBarsData: [LineChartBarData(spots: ecgPoints, isCurved: true, curveSmoothness: 0.15, color: Colors.green.shade500, barWidth: 2.5, isStrokeCapRound: true, dotData: const FlDotData(show: false), belowBarData: BarAreaData(show: true, gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Colors.green.shade500.withOpacity(0.3), Colors.green.shade500.withOpacity(0.0)])))]))),
-        ]),
+    return StreamBuilder<Map<String, dynamic>>(
+      stream: mqttService.ecgStream,
+      builder: (context, snapshot) {
+        // Dữ liệu ECG từ MQTT
+        List<int> dataPoints = [];
+        String packetId = '--';
+        String updateTime = 'Chờ dữ liệu...';
+        
+        if (snapshot.hasData) {
+          final ecgData = snapshot.data!;
+          dataPoints = List<int>.from(ecgData['dataPoints'] ?? []);
+          packetId = ecgData['packet_id']?.toString() ?? '--';
+          final timestamp = DateTime.tryParse(ecgData['timestamp'] ?? '');
+          if (timestamp != null) {
+            final now = DateTime.now();
+            final diff = now.difference(timestamp).inSeconds;
+            updateTime = diff < 60 ? 'Vừa xong' : 'Cập nhật $diff giây trước';
+          }
+        } else if (mqttService.currentECGData != null) {
+          // Hiển thị dữ liệu cũ nếu không có dữ liệu mới
+          final ecgData = mqttService.currentECGData!;
+          dataPoints = List<int>.from(ecgData['dataPoints'] ?? []);
+          packetId = ecgData['packet_id']?.toString() ?? '--';
+          updateTime = 'Dữ liệu trước đó';
+        }
+        
+        // Convert ECG data points to FlSpot for chart - PROFESSIONAL ECG PROCESSING
+        List<FlSpot> ecgPoints = [];
+        if (dataPoints.isNotEmpty) {
+          // === STEP 1: Calculate baseline and remove DC offset ===
+          final mean = dataPoints.reduce((a, b) => a + b) / dataPoints.length;
+          List<double> centered = dataPoints.map((p) => (p - mean).toDouble()).toList();
+          
+          // === STEP 2: Normalize to ±1 range for better visualization ===
+          final maxVal = centered.map((v) => v.abs()).reduce((a, b) => a > b ? a : b);
+          final normalized = maxVal > 0 
+            ? centered.map((v) => v / maxVal).toList() 
+            : centered;
+          
+          // === STEP 3: Adaptive windowing - Show ALL points (100 samples) ===
+          final displayData = normalized;
+          
+          // === STEP 4: Generate chart points ===
+          for (int i = 0; i < displayData.length; i++) {
+            final voltage = displayData[i] * 3.0; // Scale to ±3mV visual range
+            final timeSeconds = i / 125.0; // 125Hz sampling rate
+            ecgPoints.add(FlSpot(timeSeconds, voltage));
+          }
+        } else {
+          // Default ECG pattern khi không có dữ liệu
+          ecgPoints = [
+            const FlSpot(0, 0), const FlSpot(0.5, 0), const FlSpot(1.0, 0.2), 
+            const FlSpot(1.5, 0), const FlSpot(1.8, -0.2), const FlSpot(2.0, 2.5), 
+            const FlSpot(2.2, -0.5), const FlSpot(2.5, 0), const FlSpot(3.0, 0.3),
+          ];
+        }
+        
+        return Card(
+          elevation: 4, 
+          shadowColor: Colors.black.withOpacity(0.05), 
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween, 
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8), 
+                          decoration: BoxDecoration(
+                            color: Colors.green.shade50, 
+                            borderRadius: BorderRadius.circular(8)
+                          ), 
+                          child: Icon(Icons.monitor_heart_outlined, color: Colors.green.shade600)
+                        ), 
+                        const SizedBox(width: 12), 
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start, 
+                          children: [
+                            Text(
+                              'Điện tâm đồ (ECG)', 
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.bold, 
+                                fontSize: 16
+                              )
+                            ), 
+                            Text(
+                              updateTime, 
+                              style: GoogleFonts.inter(
+                                fontSize: 12, 
+                                color: Colors.grey
+                              )
+                            ),
+                            if (dataPoints.isNotEmpty)
+                              Row(
+                                children: [
+                                  Text(
+                                    'Packet: $packetId', 
+                                    style: GoogleFonts.inter(
+                                      fontSize: 10, 
+                                      color: Colors.blue[700],
+                                      fontWeight: FontWeight.w600,
+                                    )
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.shade100,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      '${dataPoints.length} samples • 125Hz',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 9,
+                                        color: Colors.green.shade800,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                          ]
+                        )
+                      ]
+                    ),
+                    StreamBuilder<bool>(
+                      stream: connectionStatusStream,
+                      initialData: false,
+                      builder: (context, snapshot) {
+                        final isOnline = snapshot.data ?? false;
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), 
+                          decoration: BoxDecoration(
+                            color: isOnline 
+                              ? Colors.green.shade100 
+                              : Colors.grey.shade200, 
+                            borderRadius: BorderRadius.circular(20)
+                          ), 
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.circle,
+                                size: 8,
+                                color: isOnline 
+                                  ? Colors.green.shade800 
+                                  : Colors.grey,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                isOnline ? 'Live' : 'Offline', 
+                                style: GoogleFonts.inter(
+                                  color: isOnline 
+                                    ? Colors.green.shade800 
+                                    : Colors.grey.shade700, 
+                                  fontSize: 12, 
+                                  fontWeight: FontWeight.bold
+                                )
+                              ),
+                            ],
+                          )
+                        );
+                      }
+                    ),
+                  ]
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  height: 180,
+                  width: double.infinity,
+                  clipBehavior: Clip.hardEdge,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: LineChart(
+                    LineChartData(
+                      gridData: FlGridData(
+                        show: true,
+                        drawVerticalLine: true,
+                        verticalInterval: 0.2, // Grid mỗi 200ms (chuẩn y tế)
+                        horizontalInterval: 1.0, // Grid mỗi 1mV
+                        getDrawingVerticalLine: (value) {
+                          // Major grid at 1s, minor at 200ms
+                          final isMajor = (value * 5) % 5 == 0;
+                          return FlLine(
+                            color: isMajor 
+                              ? Colors.grey.shade700.withOpacity(0.5) 
+                              : Colors.grey.shade800.withOpacity(0.3),
+                            strokeWidth: isMajor ? 1.0 : 0.5,
+                          );
+                        },
+                        getDrawingHorizontalLine: (value) {
+                          // Baseline nổi bật
+                          if (value == 0) {
+                            return FlLine(
+                              color: Colors.grey.shade600,
+                              strokeWidth: 1.5,
+                            );
+                          }
+                          return FlLine(
+                            color: Colors.grey.shade800.withOpacity(0.3),
+                            strokeWidth: 0.5,
+                          );
+                        },
+                      ), 
+                      titlesData: FlTitlesData(
+                        show: true,
+                        bottomTitles: AxisTitles(
+                          axisNameWidget: Text(
+                            'Thời gian (giây) - Sampling: 125Hz',
+                            style: GoogleFonts.inter(fontSize: 9, color: Colors.grey[600]),
+                          ),
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            interval: 0.2,
+                            reservedSize: 25,
+                            getTitlesWidget: (value, meta) {
+                              // Chỉ hiện số tròn
+                              if (value % 0.2 != 0) return const SizedBox.shrink();
+                              return Text(
+                                value.toStringAsFixed(1),
+                                style: GoogleFonts.inter(fontSize: 8, color: Colors.grey[600]),
+                              );
+                            },
+                          ),
+                        ),
+                        leftTitles: AxisTitles(
+                          axisNameWidget: Text(
+                            'Biên độ (mV)',
+                            style: GoogleFonts.inter(fontSize: 9, color: Colors.grey[600]),
+                          ),
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            interval: 1.0,
+                            reservedSize: 40,
+                            getTitlesWidget: (value, meta) {
+                              return Text(
+                                '${value.toStringAsFixed(0)} mV',
+                                style: GoogleFonts.inter(fontSize: 8, color: Colors.grey[600]),
+                              );
+                            },
+                          ),
+                        ),
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      ), 
+                      borderData: FlBorderData(
+                        show: true,
+                        border: Border.all(color: Colors.grey.shade300, width: 1),
+                      ), 
+                      minX: 0, 
+                      maxX: ecgPoints.isNotEmpty && ecgPoints.last.x > 0
+                        ? ecgPoints.last.x // Dynamic based on actual data length
+                        : 1.0, 
+                      minY: -4.0, // Professional ECG range ±4mV
+                      maxY: 4.0, 
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: ecgPoints, 
+                          isCurved: false, // Sharp/Linear for medical accuracy
+                          color: const Color(0xFF00E676), // Professional green (#00E676)
+                          barWidth: 1.8, 
+                          isStrokeCapRound: false, 
+                          dotData: const FlDotData(show: false), 
+                          belowBarData: BarAreaData(
+                            show: true, 
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter, 
+                              end: Alignment.bottomCenter, 
+                              colors: [
+                                Colors.green.shade500.withOpacity(0.3), 
+                                Colors.green.shade500.withOpacity(0.0)
+                              ]
+                            )
+                          )
+                        )
+                      ]
+                    )
+                  ),
+                ),
+              ]
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// === AI DIAGNOSIS CARD ===
+class _AIDiagnosisCard extends StatelessWidget {
+  final AIDiagnosis diagnosis;
+
+  const _AIDiagnosisCard({required this.diagnosis});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(
+          color: diagnosis.severityColor.withOpacity(0.3),
+          width: 2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: diagnosis.severityColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  diagnosis.severityIcon,
+                  color: diagnosis.severityColor,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '🤖 Chẩn đoán AI',
+                          style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF1F2937),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: diagnosis.model == 'MLP' 
+                              ? Colors.blue.withOpacity(0.1)
+                              : Colors.purple.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            diagnosis.model,
+                            style: GoogleFonts.inter(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: diagnosis.model == 'MLP' ? Colors.blue : Colors.purple,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      DateFormat('HH:mm - dd/MM/yyyy').format(diagnosis.timestamp),
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 16),
+          const Divider(),
+          const SizedBox(height: 16),
+
+          // Kết quả chẩn đoán
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Kết quả',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      diagnosis.result,
+                      style: GoogleFonts.inter(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: diagnosis.severityColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Độ tin cậy',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text(
+                          '${diagnosis.confidence.toStringAsFixed(1)}%',
+                          style: GoogleFonts.inter(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF1F2937),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(
+                          diagnosis.confidence >= 80 
+                            ? Icons.verified 
+                            : Icons.info_outline,
+                          color: diagnosis.confidence >= 80 
+                            ? Colors.green 
+                            : Colors.orange,
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          // Recommendation (nếu có)
+          if (diagnosis.recommendation != null) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: diagnosis.severityColor.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: diagnosis.severityColor.withOpacity(0.2),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.lightbulb_outline,
+                    color: diagnosis.severityColor,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      diagnosis.recommendation!,
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        color: const Color(0xFF1F2937),
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // Actions
+          if (diagnosis.severity == 'DANGER' || diagnosis.severity == 'WARNING') ...[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  context.push('/find-doctor');
+                },
+                icon: const Icon(Icons.medical_services, size: 18),
+                label: Text(
+                  'Liên hệ bác sĩ ngay',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: diagnosis.severityColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 2,
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:app_iot/core/api/api_client.dart';
+import 'package:app_iot/service/mqtt_service.dart';
 
 class SocketService {
   // Singleton Pattern
@@ -26,6 +27,19 @@ class SocketService {
   // 3. Stream cho Health Alerts (Real-time dangerous condition warnings)
   final _healthAlertController = StreamController<Map<String, dynamic>>.broadcast();
   Stream<Map<String, dynamic>> get healthAlertStream => _healthAlertController.stream;
+
+  // 3b. Stream cho AI Diagnosis Results (hiển thị trên dashboard)
+  final _aiDiagnosisController = StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get aiDiagnosisStream => _aiDiagnosisController.stream;
+
+  // 3c. Stream cho Connection Status (online/offline dựa trên data activity)
+  final _connectionStatusController = StreamController<bool>.broadcast();
+  Stream<bool> get connectionStatusStream => _connectionStatusController.stream;
+  
+  // Timer để track data activity
+  Timer? _dataActivityTimer;
+  DateTime? _lastDataReceivedAt;
+  static const _dataTimeoutSeconds = 10; // Offline sau 10 giây không có dữ liệu
 
   // 4. Stream cho Incoming Call (OLD - giữ cho tương thích)
   final _incomingCallController = StreamController<Map<String, dynamic>>.broadcast();
@@ -55,6 +69,30 @@ class SocketService {
 
   IO.Socket? get socket => _socket;
   bool get isConnected => _socket?.connected ?? false;
+  
+  // Cập nhật data activity và reset timer
+  void _updateDataActivity() {
+    _lastDataReceivedAt = DateTime.now();
+    
+    print('✅ [STATUS] Data activity updated - Timer reset');
+    
+    // Emit online status
+    if (!_connectionStatusController.isClosed) {
+      _connectionStatusController.add(true);
+      print('   → Status: ONLINE (emitted to stream)');
+    }
+    
+    // Cancel timer cũ và tạo timer mới
+    _dataActivityTimer?.cancel();
+    _dataActivityTimer = Timer(Duration(seconds: _dataTimeoutSeconds), () {
+      print('\n⚠️ [STATUS] No data for $_dataTimeoutSeconds seconds - Setting status to OFFLINE');
+      if (!_connectionStatusController.isClosed) {
+        _connectionStatusController.add(false);
+        print('   → Status: OFFLINE (emitted to stream)\n');
+      }
+    });
+    print('   → Timer set: $_dataTimeoutSeconds seconds until offline\n');
+  }
 
   // --- HÀM KẾT NỐI ---
   Future<void> connect() async {
@@ -118,11 +156,20 @@ class SocketService {
       print('   Socket ID: ${_socket?.id}');
       print('   Server URL: ${_apiClient.baseUrl}');
       print('═══════════════════════════════════════════\n');
+      
+      // Không tự động emit online, chờ dữ liệu từ MQTT
+      print('⏳ [STATUS] Waiting for MQTT data to go online...');
     });
 
     _socket?.onDisconnect((_) {
       print('\n🔌 [SOCKET] Disconnected from server');
       print('═══════════════════════════════════════════\n');
+      
+      // Cancel timer và emit offline
+      _dataActivityTimer?.cancel();
+      if (!_connectionStatusController.isClosed) {
+        _connectionStatusController.add(false);
+      }
     });
 
     _socket?.onConnectError((data) {
@@ -140,8 +187,21 @@ class SocketService {
     _socket?.onReconnect((_) {
       print('\n🔄 [SOCKET] Reconnected!');
       print('═══════════════════════════════════════════\n');
+      
+      print('⏳ [STATUS] Waiting for MQTT data to go online...');
     });
 
+    // Lắng nghe MQTT data activity từ backend
+    _socket?.on('mqtt_data_activity', (data) {
+      print('\n📡 [MQTT] ═══ DATA ACTIVITY RECEIVED ═══');
+      print('   Type: ${data['type']}');
+      print('   User ID: ${data['user_id']}');
+      print('   Timestamp: ${data['timestamp']}');
+      print('   → Setting status to ONLINE');
+      print('═══════════════════════════════════════════\n');
+      _updateDataActivity();
+    });
+    
     // Lắng nghe tin nhắn chat
     _socket?.on('new_message', (data) {
       if (data != null && !_messageController.isClosed) {
@@ -169,6 +229,64 @@ class SocketService {
       if (data != null && !_healthAlertController.isClosed) {
         print("🚨 [SOCKET] Health Alert: $data");
         _healthAlertController.add(Map<String, dynamic>.from(data));
+      }
+    });
+
+    // --- REAL-TIME HEALTH DATA FROM MQTT ---
+    // Listen for medical data from backend MQTT service
+    _socket?.on('medical_data_new', (data) {
+      if (data != null) {
+        print("💓 [SOCKET] Real-time Medical Data: HR=${data['heart_rate']}, SpO2=${data['spo2']}, Temp=${data['temperature']}°C");
+        // Forward to MQTT service for dashboard
+        final mqttService = MqttService();
+        mqttService.handleSocketMedicalData(data);
+      }
+    });
+
+    // Listen for ECG data from backend MQTT service
+    _socket?.on('ecg_data_new', (data) {
+      if (data != null) {
+        print("📊 [SOCKET] Real-time ECG Data: Packet ${data['packet_id']}");
+        // Forward to MQTT service for dashboard
+        final mqttService = MqttService();
+        mqttService.handleSocketECGData(data);
+      }
+    });
+
+    // --- AI DIAGNOSIS ALERTS ---
+    // Listen for AI medical diagnosis alerts (MLP Model)
+    _socket?.on('ai_medical_alert', (data) {
+      if (data != null) {
+        final diagnosisData = Map<String, dynamic>.from(data);
+        print("🤖 [SOCKET] AI Medical Alert: ${data['riskLabel']} (${data['confidence']}%)");
+        
+        // Emit to alert stream (for popup)
+        if (!_healthAlertController.isClosed) {
+          _healthAlertController.add(diagnosisData);
+        }
+        
+        // Emit to diagnosis stream (for dashboard display)
+        if (!_aiDiagnosisController.isClosed) {
+          _aiDiagnosisController.add(diagnosisData);
+        }
+      }
+    });
+
+    // Listen for AI ECG diagnosis alerts (CNN Model)
+    _socket?.on('ai_ecg_alert', (data) {
+      if (data != null) {
+        final diagnosisData = Map<String, dynamic>.from(data);
+        print("🚨 [SOCKET] AI ECG Alert: ${data['result']} (${data['confidence']}%)");
+        
+        // Emit to alert stream (for popup)
+        if (!_healthAlertController.isClosed) {
+          _healthAlertController.add(diagnosisData);
+        }
+        
+        // Emit to diagnosis stream (for dashboard display)
+        if (!_aiDiagnosisController.isClosed) {
+          _aiDiagnosisController.add(diagnosisData);
+        }
       }
     });
 
@@ -603,6 +721,11 @@ class SocketService {
       _socket!.dispose();
       _socket = null;
     }
+    
+    // Cancel data activity timer
+    _dataActivityTimer?.cancel();
+    _dataActivityTimer = null;
+    
     // LƯU Ý: Không close _messageController hay _notificationController ở đây
     // để có thể tái sử dụng khi user đăng nhập lại mà không cần khởi động lại app.
   }

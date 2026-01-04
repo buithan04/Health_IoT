@@ -73,8 +73,10 @@ const startServer = async () => {
         mqttCleanupWorker.start();
         console.log('✅ Cleanup worker started');
 
-        // 4. Tải AI (optional)
-        // await loadAllModels();
+        // 4. Load AI Models (MLP + CNN)
+        console.log('🤖 Loading AI models...');
+        await loadAllModels();
+        console.log('✅ AI models loaded successfully');
 
         // 5. Bắt đầu lắng nghe
         server.listen(port, '0.0.0.0', () => {

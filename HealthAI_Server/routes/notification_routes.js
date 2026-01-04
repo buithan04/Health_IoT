@@ -21,4 +21,7 @@ router.get('/unread-count', notificationController.getUnreadCount);
 // DELETE /api/notifications/:id -> Xóa của chính mình
 router.delete('/:id', notificationController.deleteNotification);
 
+// DELETE /api/notifications/all -> Xóa TẤT CẢ thông báo của user
+router.delete('/all', notificationController.deleteAllNotifications);
+
 module.exports = router;

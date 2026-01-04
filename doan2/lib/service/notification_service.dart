@@ -67,4 +67,15 @@ class NotificationService {
       return false;
     }
   }
+
+  // 3.1 Xóa TẤT CẢ thông báo
+  Future<bool> deleteAllNotifications() async {
+    try {
+      final response = await _apiClient.delete('/notifications/all');
+      return response.statusCode == 200;
+    } catch (e) {
+      print("❌ Lỗi deleteAllNotifications: $e");
+      return false;
+    }
+  }
 }

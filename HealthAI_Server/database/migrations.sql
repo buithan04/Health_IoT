@@ -269,6 +269,8 @@ CREATE TABLE IF NOT EXISTS ai_diagnoses (
     confidence_score NUMERIC(5,4),
     severity_level VARCHAR(20),
     is_alert_sent BOOLEAN DEFAULT FALSE,
+    input_data JSONB,
+    output_data JSONB,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

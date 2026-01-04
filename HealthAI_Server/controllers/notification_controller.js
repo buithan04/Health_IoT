@@ -73,10 +73,27 @@ const getUnreadCount = async (req, res) => {
     }
 };
 
+// Xóa TẤT CẢ thông báo của user
+const deleteAllNotifications = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const deletedCount = await notificationService.deleteAllNotifications(userId);
+
+        res.json({
+            message: `Đã xóa ${deletedCount} thông báo`,
+            deletedCount
+        });
+    } catch (error) {
+        console.error("Lỗi deleteAllNotifications:", error);
+        res.status(500).json({ error: "Lỗi server" });
+    }
+};
+
 module.exports = {
     getMyNotifications,
     markAsRead,
     markAllAsRead,
     deleteNotification,
+    deleteAllNotifications,
     getUnreadCount
 };

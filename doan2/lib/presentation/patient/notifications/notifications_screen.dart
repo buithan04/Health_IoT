@@ -84,6 +84,63 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
+  Future<void> _deleteAllNotifications() async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.clear_all_rounded, color: Colors.orange[700], size: 28),
+            const SizedBox(width: 12),
+            const Text('Xóa hiển thị'),
+          ],
+        ),
+        content: Text(
+          'Xóa TẤT CẢ ${_notifications.length} thông báo khỏi danh sách hiển thị?\n\n(Thông báo vẫn được lưu trong hệ thống)',
+          style: GoogleFonts.inter(fontSize: 15, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Hủy', style: GoogleFonts.inter(color: Colors.grey[700])),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange[600],
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Xóa hiển thị'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    // Clear local display only (no API call)
+    setState(() {
+      _notifications.clear();
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Đã xóa tất cả khỏi danh sách hiển thị'),
+        backgroundColor: Colors.green[600],
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        action: SnackBarAction(
+          label: 'Tải lại',
+          textColor: Colors.white,
+          onPressed: _loadData,
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _subscription?.cancel(); // Hủy lắng nghe
@@ -151,12 +208,41 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             centerTitle: true,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
             actions: [
-              if (_notifications.isNotEmpty)
+              if (_notifications.isNotEmpty) ...[
                 IconButton(
                   tooltip: 'Đánh dấu đã đọc hết',
                   icon: const Icon(Icons.done_all_rounded, color: Colors.black87),
                   onPressed: _markAllAsRead,
                 ),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert_rounded, color: Colors.black87),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  offset: const Offset(0, 50),
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'delete_all',
+                      child: Row(
+                        children: [
+                          Icon(Icons.clear_all_rounded, color: Colors.orange[600], size: 22),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Xóa hiển thị',
+                            style: GoogleFonts.inter(
+                              color: Colors.orange[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  onSelected: (value) {
+                    if (value == 'delete_all') {
+                      _deleteAllNotifications();
+                    }
+                  },
+                ),
+              ],
             ],
             leading: IconButton(
               icon: const Icon(Icons.arrow_back, color: Colors.black87),

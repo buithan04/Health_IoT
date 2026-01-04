@@ -21,6 +21,16 @@ build/
 coverage/
 .nyc_output/
 *.lcov
+tests/
+
+# Temporary/Debug files
+check_*.js
+test_*.js
+test_*.ps1
+*.test.js
+analyze_*.js
+list_*.js
+monitor_*.ps1
 
 # Environment variables - NEVER COMMIT THESE!
 .env

@@ -17,23 +17,46 @@ async function runMigrations() {
     try {
         console.log('\n🚀 Running database migrations...\n');
 
+        // Step 1: Run main migrations.sql (CREATE TABLES)
+        console.log('📋 Step 1: Creating tables from migrations.sql...');
         const sqlFile = path.join(__dirname, 'database', 'migrations.sql');
         const sql = fs.readFileSync(sqlFile, 'utf8');
-
-        // Execute the SQL
         await client.query(sql);
+        console.log('✅ Base tables created\n');
 
-        console.log('✅ Migrations completed successfully!\n');
+        // Step 2: Run individual migration files (ALTER TABLES, etc.)
+        const migrationsDir = path.join(__dirname, 'database', 'migrations');
+        if (fs.existsSync(migrationsDir)) {
+            const migrationFiles = fs.readdirSync(migrationsDir)
+                .filter(file => file.endsWith('.sql'))
+                .sort(); // Run in alphabetical order
+
+            if (migrationFiles.length > 0) {
+                console.log(`📋 Step 2: Running ${migrationFiles.length} migration file(s)...\n`);
+
+                for (const file of migrationFiles) {
+                    const filePath = path.join(migrationsDir, file);
+                    const migrationSql = fs.readFileSync(filePath, 'utf8');
+
+                    console.log(`   🔄 Running: ${file}`);
+                    await client.query(migrationSql);
+                    console.log(`   ✅ Completed: ${file}`);
+                }
+                console.log('');
+            }
+        }
+
+        console.log('✅ All migrations completed successfully!\n');
 
         // Show created tables
         const result = await client.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-      ORDER BY table_name;
-    `);
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            ORDER BY table_name;
+        `);
 
-        console.log(`📊 Created ${result.rows.length} tables:`);
+        console.log(`📊 Database contains ${result.rows.length} tables:`);
         result.rows.forEach(row => {
             console.log(`  • ${row.table_name}`);
         });

@@ -63,10 +63,27 @@ const deleteNotification = async (id, userId) => {
     return result.rowCount > 0;
 };
 
+// 5.1 Xóa TẤT CẢ thông báo của user
+const deleteAllNotifications = async (userId) => {
+    const result = await pool.query(
+        'DELETE FROM notifications WHERE user_id = $1',
+        [userId]
+    );
+    return result.rowCount; // Trả về số lượng đã xóa
+};
+
 // 6. Đếm số thông báo chưa đọc của tôi
 const countUnread = async (userId) => {
     const res = await pool.query('SELECT COUNT(*) AS unread FROM notifications WHERE user_id = $1 AND is_read = FALSE', [userId]);
     return parseInt(res.rows[0]?.unread || 0, 10);
 };
 
-module.exports = { createNotification, getMyNotifications, markRead, markAllRead, deleteNotification, countUnread };
+module.exports = {
+    createNotification,
+    getMyNotifications,
+    markRead,
+    markAllRead,
+    deleteNotification,
+    deleteAllNotifications,
+    countUnread
+};

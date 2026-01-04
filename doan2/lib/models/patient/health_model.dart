@@ -1,5 +1,60 @@
 // lib/models/health_model.dart
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+
+// AI Diagnosis Model
+class AIDiagnosis {
+  final String model; // 'MLP' or 'CNN'
+  final String result; // Risk level or ECG classification
+  final double confidence; // Percentage
+  final String severity; // 'NORMAL', 'WARNING', 'DANGER'
+  final String? recommendation;
+  final DateTime timestamp;
+
+  AIDiagnosis({
+    required this.model,
+    required this.result,
+    required this.confidence,
+    required this.severity,
+    this.recommendation,
+    required this.timestamp,
+  });
+
+  factory AIDiagnosis.fromJson(Map<String, dynamic> json) {
+    return AIDiagnosis(
+      model: json['model'] ?? 'Unknown',
+      result: json['riskLabel'] ?? json['result'] ?? 'Unknown',
+      confidence: (json['confidence'] ?? 0).toDouble(),
+      severity: json['severity'] ?? 'NORMAL',
+      recommendation: json['recommendation'],
+      timestamp: json['timestamp'] != null 
+        ? DateTime.parse(json['timestamp'])
+        : DateTime.now(),
+    );
+  }
+
+  Color get severityColor {
+    switch (severity) {
+      case 'DANGER':
+        return Color(0xFFDC2626);
+      case 'WARNING':
+        return Color(0xFFF59E0B);
+      default:
+        return Color(0xFF10B981);
+    }
+  }
+
+  IconData get severityIcon {
+    switch (severity) {
+      case 'DANGER':
+        return Icons.warning_amber_rounded;
+      case 'WARNING':
+        return Icons.info_outline;
+      default:
+        return Icons.check_circle_outline;
+    }
+  }
+}
 
 class HealthMetric {
   final String heartRate;
@@ -19,10 +74,10 @@ class HealthMetric {
   // Giá trị mặc định
   factory HealthMetric.empty() {
     return HealthMetric(
-      heartRate: '--',
-      spo2: '--',
-      temperature: '--',
-      bloodPressure: '--',
+      heartRate: '0',
+      spo2: '0',
+      temperature: '0',
+      bloodPressure: '0/0',
       timestamp: DateTime.now(),
     );
   }

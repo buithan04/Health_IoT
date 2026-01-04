@@ -13,8 +13,11 @@ const reminderRoutes = require('./reminder_routes');
 const articleRoutes = require('./article_routes');
 const notificationRoutes = require('./notification_routes');
 const mqttRoutes = require('./mqtt_routes');
+const mqttApiRoutes = require('./mqtt');  // New MQTT API routes
 const adminRoutes = require('./admin_routes');
 const callHistoryRoutes = require('./call_history');
+const healthStatsRoutes = require('./health_stats_routes'); // Health statistics API
+const sensorWarningsRoutes = require('./sensor_warnings'); // Sensor warnings API
 
 // Admin routes (protected with admin middleware)
 router.use('/admin', adminRoutes);
@@ -22,8 +25,11 @@ router.use('/admin', adminRoutes);
 // Call history routes
 router.use('/call-history', callHistoryRoutes);
 
-// Thêm router MQTT
+// Thêm router MQTT (legacy)
 router.use('/mqtt', mqttRoutes);
+
+// Thêm router MQTT API (new - for app connection)
+router.use('/mqtt-api', mqttApiRoutes);
 
 // Thêm router thông báo
 router.use('/notifications', notificationRoutes);
@@ -45,6 +51,12 @@ router.use('/appointments', appointmentRoutes);
 
 // Thêm router bác sĩ
 router.use('/doctors', doctorRoutes);
+
+// Thêm router thống kê sức khỏe
+router.use('/health-stats', healthStatsRoutes);
+
+// Thêm router sensor warnings
+router.use('/sensor-warnings', sensorWarningsRoutes);
 
 // Định tuyến
 router.use('/auth', authRoutes);
