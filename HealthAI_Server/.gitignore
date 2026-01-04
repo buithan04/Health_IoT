@@ -1,0 +1,86 @@
+# ============================================
+# NODE.JS / EXPRESS SERVER
+# ============================================
+
+# Dependencies
+node_modules/
+jspm_packages/
+
+# Lock files (choose one lock file strategy for your team)
+# Uncomment the ones you don't want to commit:
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# Build output
+dist/
+build/
+*.js.map
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+
+# Environment variables - NEVER COMMIT THESE!
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+
+# Firebase/Google Cloud credentials - NEVER COMMIT!
+config/serviceAccountKey.json
+serviceAccountKey.json
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
