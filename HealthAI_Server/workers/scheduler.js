@@ -16,7 +16,7 @@ const startScheduler = () => {
         const timeString = `${currentHour}:${currentMinute}`;
 
         // In ra để xem Server đang chạy giờ nào
-        console.log(`⏳ Đang quét lịch lúc: ${timeString}`);
+        console.log(`⏳ Scanning appointments at: ${timeString}`);
 
         try {
             // Tìm kiếm các nhắc nhở khớp giờ (HH:mm%)

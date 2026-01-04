@@ -6,7 +6,7 @@ const { pool } = require('../config/db');
 const API_KEY = '16e45671465f49fba73f25b2a9c368ca';
 
 const fetchAndSaveArticles = async () => {
-    console.log("🔄 Đang kết nối NewsAPI (Chế độ ép buộc IPv4)...");
+    console.log("🔄 Connecting to NewsAPI (IPv4 mode)...");
 
     try {
         // 2. Cấu hình Agent để ép dùng IPv4
@@ -63,7 +63,7 @@ const fetchAndSaveArticles = async () => {
         if (count > 0) {
             console.log(`✅ Đã cập nhật thêm ${count} bài viết mới.`);
         } else {
-            console.log("ℹ️ Không có bài mới (Dữ liệu đã tồn tại).");
+            console.log("ℹ️ No new articles (data already exists).");
         }
 
     } catch (error) {

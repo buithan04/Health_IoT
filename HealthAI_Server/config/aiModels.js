@@ -3,7 +3,7 @@ const tf = require('@tensorflow/tfjs-node');
 const fs = require('fs').promises;
 const path = require('path');
 
-console.log(`TensorFlow.js backend (đã set): ${tf.getBackend()}`);
+console.log(`✅ TensorFlow.js backend: ${tf.getBackend()}`);
 
 // Biến này sẽ giữ các model/scaler đã tải
 const models = {};
