@@ -15,6 +15,7 @@ Hệ thống quản lý sức khỏe toàn diện với các tính năng:
 
 ## 📋 Mục Lục
 
+- [🚀 Quick Start - Setup Guide](./SETUP_GUIDE.md) ⭐ **Bắt đầu tại đây!**
 - [Yêu Cầu Hệ Thống](#yêu-cầu-hệ-thống)
 - [Cấu Trúc Project](#cấu-trúc-project)
 - [Cài Đặt](#cài-đặt)
@@ -26,6 +27,25 @@ Hệ thống quản lý sức khỏe toàn diện với các tính năng:
 - [API Documentation](#api-documentation)
 - [Contributing](#contributing)
 - [License](#license)
+
+---
+
+## 🚀 Setup Dự Án Trên Máy Mới
+
+**Nếu bạn là người mới và muốn chạy dự án này trên máy của mình:**
+
+👉 **[Xem Hướng Dẫn Setup Chi Tiết](./SETUP_GUIDE.md)** 👈
+
+Hướng dẫn bao gồm:
+- ✅ Clone repository từ GitHub
+- ✅ Cài đặt dependencies cho tất cả components
+- ✅ Cấu hình database, Firebase, ZegoCloud
+- ✅ Tạo file .env với các biến môi trường
+- ✅ Chạy migrations và seed data
+- ✅ Troubleshooting các lỗi thường gặp
+- ✅ Tài khoản test để đăng nhập
+
+---
 
 ## 🔧 Yêu Cầu Hệ Thống
 
