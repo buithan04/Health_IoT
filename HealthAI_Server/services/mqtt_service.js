@@ -260,14 +260,15 @@ class MQTTService {
 
             this.lastPacketId.medical = dataHash;
 
-            // Map device_id to user_id (temporary hardcode for user 10)
-            // TODO: Create device_users table for proper mapping
-            let userId = data.user_id;
+            // Lấy user_id từ payload (hỗ trợ cả userID và user_id)
+            let userId = data.userID || data.user_id;
+
             if (!userId) {
-                // Hardcode all ESP32 medical data → User 10
-                userId = 10;
-                console.log(`🔗 Mapped medical data → User ${userId}`);
+                console.warn('⚠️ [Medical] Không tìm thấy userID trong dữ liệu, bỏ qua');
+                return;
             }
+
+            console.log(`🔗 Processing medical data for User ${userId}`);
 
             const medicalData = {
                 temperature: parseFloat(data.temp || 0),
@@ -437,17 +438,6 @@ class MQTTService {
      */
     async handleECGData(data) {
         try {
-            // Emit data activity ngay khi nhận được ECG data
-            if (global.io) {
-                const activityData = {
-                    type: 'ecg',
-                    timestamp: new Date(),
-                    user_id: data.user_id || null
-                };
-                global.io.emit('mqtt_data_activity', activityData);
-                console.log(`📡 [EMIT] mqtt_data_activity broadcast - Type: ecg, User: ${data.user_id || 'null'}`);
-            }
-
             const packetId = data.packet_id;
 
             // Kiểm tra packet_id mới
@@ -458,11 +448,25 @@ class MQTTService {
 
             this.lastPacketId.ecg = packetId;
 
-            // Map device_id to user_id (temporary hardcode for user 10)
-            let userId = data.user_id;
-            if (!userId && data.device_id) {
-                userId = 10;
-                console.log(`🔗 Mapped device ${data.device_id} → User ${userId}`);
+            // Lấy user_id từ payload (hỗ trợ cả userID và user_id) - MAP TRƯỚC
+            let userId = data.userID || data.user_id;
+
+            if (!userId) {
+                console.warn('⚠️ [ECG] Không tìm thấy userID trong dữ liệu, bỏ qua');
+                return;
+            }
+
+            console.log(`🔗 Processing ECG data for User ${userId}`);
+
+            // Emit data activity SAU KHI đã có userId
+            if (global.io) {
+                const activityData = {
+                    type: 'ecg',
+                    timestamp: new Date(),
+                    user_id: userId  // Dùng userId đã map
+                };
+                global.io.emit('mqtt_data_activity', activityData);
+                console.log(`📡 [EMIT] mqtt_data_activity broadcast - Type: ecg, User: ${userId}`);
             }
 
             const ecgData = {

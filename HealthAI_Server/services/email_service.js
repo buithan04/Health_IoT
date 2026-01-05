@@ -21,7 +21,7 @@ const EMAIL_ENABLED = !!(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWOR
  * @param {string} token - Token xác thực
  */
 const sendVerificationEmail = async (userEmail, token) => {
-    const verificationLink = `http://192.168.1.5:5000/api/auth/verify?token=${token}`;
+    const verificationLink = `http://192.168.65.47:5000/api/auth/verify?token=${token}`;
 
     const mailOptions = {
         from: '"HealthAI - Nền tảng Chăm sóc Sức khỏe" <than.65.cvan@gmail.com>',

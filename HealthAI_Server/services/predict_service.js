@@ -71,10 +71,16 @@ const processVitals = async (userId, { heart_rate, spo2, temperature, sys_bp, di
         const gender_encoded = (genderStr === 'male' || genderStr === 'nam' || genderStr === '1') ? 1 : 0;
 
         // 2.5. MAP (Mean Arterial Pressure) = (SBP + 2*DBP) / 3
-        // Nếu thiết bị không gửi huyết áp, dùng giá trị trung bình mặc định (120/80 -> MAP ~93)
-        const sbp = sys_bp || 120;
-        const dbp = dia_bp || 80;
+        // Nếu thiết bị không gửi huyết áp, dùng giá trị trung bình mặc định của người khỏe mạnh
+        // Huyết áp bình thường: 115/75 mmHg -> MAP ~88
+        const sbp = sys_bp || 115;
+        const dbp = dia_bp || 75;
         const derived_map = (sbp + 2 * dbp) / 3;
+
+        // Log cảnh báo nếu sử dụng dữ liệu giả
+        if (!sys_bp || !dia_bp) {
+            console.log(`ℹ️ [AI-MLP] Sử dụng huyết áp giả cho user ${userId}: ${sbp}/${dbp} mmHg (MAP: ${derived_map.toFixed(1)})`);
+        }
 
         // --- VALIDATION: Reject invalid vital signs ---
         const validationErrors = [];
@@ -169,8 +175,10 @@ const processVitals = async (userId, { heart_rate, spo2, temperature, sys_bp, di
         `;
         const confidence = (Math.max(prob, 1 - prob) * 100).toFixed(2);
         const inputDataJson = {
-            heart_rate, spo2, temperature, sys_bp, dia_bp,
-            mean_arterial_pressure: inputRaw[3],
+            heart_rate, spo2, temperature,
+            sys_bp: sbp,  // Lưu giá trị thực tế đã sử dụng (có thể là giả)
+            dia_bp: dbp,  // Lưu giá trị thực tế đã sử dụng (có thể là giả)
+            mean_arterial_pressure: derived_map,
             age: inputRaw[4],
             weight: inputRaw[5],
             height: inputRaw[6],
@@ -239,6 +247,22 @@ const processECG = async (userId, { dataPoints, device_id, packet_id, average_he
         if (maxCount > dataPoints.length * 0.8) { // >80% max values
             console.warn(`⚠️ [AI-ECG] Saturated signal: ${maxCount}/${dataPoints.length} points at max value`);
             throw new Error(`ECG signal saturated: ${maxCount}/${dataPoints.length} points are maxed out`);
+        }
+
+        // Check for leads-off detection (too many zeros = điện cực rời da)
+        const zeroCount = dataPoints.filter(v => v === 0).length;
+        if (zeroCount > dataPoints.length * 0.8) { // >80% zeros (giảm từ 50% cho realistic data)
+            console.warn(`⚠️ [AI-ECG] Leads-off detected: ${zeroCount}/${dataPoints.length} zero values`);
+            throw new Error(`ECG leads disconnected: ${zeroCount}/${dataPoints.length} points are zero`);
+        }
+
+        // Check signal range (quá hẹp = tín hiệu yếu)
+        const min = Math.min(...dataPoints);
+        const max = Math.max(...dataPoints);
+        const range = max - min;
+        if (range < 20) { // Range < 20 ADC units (giảm từ 50 cho baseline noise)
+            console.warn(`⚠️ [AI-ECG] Weak signal: range=${range} (min=${min}, max=${max})`);
+            throw new Error(`ECG signal too weak: range=${range} ADC units`);
         }
 
         // --- BƯỚC 1: XỬ LÝ INPUT (Cắt/Padding về 100) ---

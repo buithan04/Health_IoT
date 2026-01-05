@@ -28,12 +28,16 @@ const connectMQTT = () => {
 
     client.on('message', async (topic, message) => {
         try {
-            // Parse topic: health/15/vitals -> Lấy userID = 15
-            const topicParts = topic.split('/');
-            const userId = topicParts[1];
-
             const payload = JSON.parse(message.toString());
-            // Payload mẫu: { "heart_rate": 110, "spo2": 96, "temp": 37.5 }
+            // Payload mẫu: { "heart_rate": 110, "spo2": 96, "temp": 37.5, "userID": 10 }
+
+            // Lấy userID từ payload thay vì từ topic
+            const userId = payload.userID || payload.user_id;
+
+            if (!userId) {
+                console.warn('⚠️ [Worker] Không tìm thấy userID trong dữ liệu, bỏ qua');
+                return;
+            }
 
             console.log(`📥 [Worker] Nhận data User ${userId}:`, payload);
 
